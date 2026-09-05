@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,10 +12,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oliver-tuschhoff/go-svn/delta"
+	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
+	"github.com/oliver-tuschhoff/go-svn/ra"
+	"github.com/oliver-tuschhoff/go-svn/rasvn"
+	"github.com/oliver-tuschhoff/go-svn/svn"
 )
 
 func main() {
@@ -22,21 +30,23 @@ func main() {
 	var svnservePath string
 	var repository string
 	var output string
+	var operation string
 	flag.StringVar(&svnPath, "svn", "svn", "path to the svn client")
 	flag.StringVar(&svnservePath, "svnserve", "svnserve", "path to svnserve")
 	flag.StringVar(&repository, "repository", "", "repository to query")
 	flag.StringVar(&output, "output", "", "transcript output path")
+	flag.StringVar(&operation, "operation", "info", "operation to record: info or read-matrix")
 	flag.Parse()
 
 	if repository == "" || output == "" {
 		fatalf("-repository and -output are required")
 	}
-	if err := record(svnPath, svnservePath, repository, output); err != nil {
+	if err := record(svnPath, svnservePath, repository, output, operation); err != nil {
 		fatalf("record transcript: %v", err)
 	}
 }
 
-func record(svnPath, svnservePath, repository, output string) error {
+func record(svnPath, svnservePath, repository, output, operation string) error {
 	repository, err := filepath.Abs(repository)
 	if err != nil {
 		return err
@@ -82,13 +92,21 @@ func record(svnPath, svnservePath, repository, output string) error {
 	}
 	defer os.RemoveAll(configDir)
 
-	client := exec.CommandContext(ctx, svnPath,
-		"--non-interactive", "--no-auth-cache", "--config-dir", configDir,
-		"info", repositoryURL,
-	)
-	clientOutput, clientErr := client.CombinedOutput()
-	if clientErr != nil {
-		return fmt.Errorf("svn info: %w: %s", clientErr, clientOutput)
+	if operation == "info" {
+		client := exec.CommandContext(ctx, svnPath,
+			"--non-interactive", "--no-auth-cache", "--config-dir", configDir,
+			"info", repositoryURL,
+		)
+		clientOutput, clientErr := client.CombinedOutput()
+		if clientErr != nil {
+			return fmt.Errorf("svn info: %w: %s", clientErr, clientOutput)
+		}
+	} else if operation == "read-matrix" {
+		if err := runReadMatrix(ctx, repositoryURL); err != nil {
+			return err
+		}
+	} else {
+		return fmt.Errorf("unknown operation %q", operation)
 	}
 
 	var streams capturedStreams
@@ -106,10 +124,29 @@ func record(svnPath, svnservePath, repository, output string) error {
 	portMarker := strings.Repeat("0", len(proxyPort))
 	streams.client = bytes.ReplaceAll(streams.client, []byte(":"+proxyPort), []byte(":"+portMarker))
 	streams.server = bytes.ReplaceAll(streams.server, []byte(":"+proxyPort), []byte(":"+portMarker))
+	if operation == "read-matrix" {
+		streams.client, err = canonicalizeWire(streams.client)
+		if err != nil {
+			return fmt.Errorf("canonicalize client transcript: %w", err)
+		}
+		streams.server, err = canonicalizeWire(streams.server)
+		if err != nil {
+			return fmt.Errorf("canonicalize server transcript: %w", err)
+		}
+	}
+	generator := "svnserve"
+	clientIdentity := "normalized when present"
+	if operation == "info" {
+		generator = "reference svn"
+		clientIdentity = "normalized to SVN/fixture (go-svn)"
+	}
 	transcript := fmt.Sprintf(
-		"# go-svn ra_svn transcript v1\n# generator: reference svn\n# operation: info /%s\n# endpoint port normalized to %s\n# client identity normalized to SVN/fixture (go-svn)\nclient-base64: %s\nserver-base64: %s\n",
+		"# go-svn ra_svn transcript v1\n# generator: %s\n# operation: %s /%s\n# endpoint port normalized to %s\n# client identity %s\nclient-base64: %s\nserver-base64: %s\n",
+		generator,
+		operation,
 		filepath.Base(repository),
 		portMarker,
+		clientIdentity,
 		base64.StdEncoding.EncodeToString(streams.client),
 		base64.StdEncoding.EncodeToString(streams.server),
 	)
@@ -118,6 +155,219 @@ func record(svnPath, svnservePath, repository, output string) error {
 	}
 	return os.WriteFile(output, []byte(transcript), 0o644)
 }
+
+func canonicalizeWire(wire []byte) ([]byte, error) {
+	reader := rasvn.NewReader(bytes.NewReader(wire))
+	items := make([]rasvn.Item, 0)
+	for {
+		item, err := reader.Decode()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		canonicalizeItem(&item)
+		items = append(items, item)
+	}
+	for start := 0; start < len(items); {
+		if _, ok := propertyCommandKey(items[start]); !ok {
+			start++
+			continue
+		}
+		end := start + 1
+		for end < len(items) {
+			if _, ok := propertyCommandKey(items[end]); !ok {
+				break
+			}
+			end++
+		}
+		sort.Slice(items[start:end], func(left, right int) bool {
+			leftKey, _ := propertyCommandKey(items[start+left])
+			rightKey, _ := propertyCommandKey(items[start+right])
+			return leftKey < rightKey
+		})
+		start = end
+	}
+	var canonical bytes.Buffer
+	writer := rasvn.NewWriter(&canonical)
+	for _, item := range items {
+		if err := writer.Encode(item); err != nil {
+			return nil, err
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		return nil, err
+	}
+	return canonical.Bytes(), nil
+}
+
+func canonicalizeItem(item *rasvn.Item) {
+	for index := range item.List {
+		canonicalizeItem(&item.List[index])
+	}
+	if len(item.List) < 2 {
+		return
+	}
+	for _, child := range item.List {
+		if child.Kind != rasvn.ListKind || len(child.List) < 2 || child.List[0].Kind != rasvn.StringKind {
+			return
+		}
+	}
+	sort.Slice(item.List, func(left, right int) bool {
+		return bytes.Compare(item.List[left].List[0].String, item.List[right].List[0].String) < 0
+	})
+}
+
+func propertyCommandKey(item rasvn.Item) (string, bool) {
+	if item.Kind != rasvn.ListKind || len(item.List) != 2 || item.List[0].Kind != rasvn.WordKind || item.List[1].Kind != rasvn.ListKind {
+		return "", false
+	}
+	command := item.List[0].Word
+	if command != "change-dir-prop" && command != "change-file-prop" {
+		return "", false
+	}
+	arguments := item.List[1].List
+	if len(arguments) < 2 || arguments[0].Kind != rasvn.StringKind || arguments[1].Kind != rasvn.StringKind {
+		return "", false
+	}
+	return command + "\x00" + string(arguments[0].String) + "\x00" + string(arguments[1].String), true
+}
+
+func runReadMatrix(ctx context.Context, repositoryURL string) error {
+	session, _, err := ra.Open(ctx, repositoryURL, nil)
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	latest, err := session.LatestRevision(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := session.DatedRevision(ctx, time.Date(2020, 1, 5, 0, 0, 0, 0, time.UTC)); err != nil {
+		return err
+	}
+	if _, err := session.RevProps(ctx, latest); err != nil {
+		return err
+	}
+	if _, _, err := session.RevProp(ctx, latest, "svn:log"); err != nil {
+		return err
+	}
+	if _, err := session.CheckPath(ctx, "trunk/README.txt", latest); err != nil {
+		return err
+	}
+	if _, err := session.Stat(ctx, "trunk/README.txt", latest); err != nil {
+		return err
+	}
+	if _, _, err := session.GetFile(ctx, "trunk/README.txt", latest, io.Discard, true); err != nil {
+		return err
+	}
+	if _, _, _, err := session.GetDir(ctx, "trunk", latest, svn.DirentAll); err != nil {
+		return err
+	}
+	if err := session.List(ctx, "trunk", latest, []string{"*"}, svn.DepthInfinity, svn.DirentAll, nil); err != nil {
+		return err
+	}
+	if err := session.Log(ctx, ra.LogOptions{Paths: []string{"trunk"}, Start: latest, End: 0, DiscoverChangedPaths: true}, nil); err != nil {
+		return err
+	}
+	if _, err := session.GetLocations(ctx, "trunk/README.txt", latest, []svn.Revnum{2, latest}); err != nil {
+		return err
+	}
+	if err := session.GetLocationSegments(ctx, "trunk/README.txt", latest, latest, 0, nil); err != nil {
+		return err
+	}
+	if err := session.GetFileRevs(ctx, "trunk/README.txt", 1, latest, false, nil); err != nil {
+		return err
+	}
+	if _, err := session.GetMergeinfo(ctx, []string{"trunk"}, latest, mergeinfo.InheritanceExplicit, false); err != nil {
+		return err
+	}
+	if _, err := session.GetInheritedProps(ctx, "trunk/README.txt", latest); err != nil {
+		return err
+	}
+	if _, err := session.GetDeletedRev(ctx, "trunk/run.sh", latest-1, latest); err != nil {
+		return err
+	}
+	if _, err := session.GetLock(ctx, "trunk/README.txt"); err != nil {
+		return err
+	}
+	if _, err := session.GetLocks(ctx, "", svn.DepthInfinity); err != nil {
+		return err
+	}
+	operations := []func(delta.Editor) (ra.Reporter, error){
+		func(editor delta.Editor) (ra.Reporter, error) {
+			return session.DoUpdate(ctx, latest, "", svn.DepthInfinity, true, false, editor)
+		},
+		func(editor delta.Editor) (ra.Reporter, error) {
+			return session.DoSwitch(ctx, latest, "", svn.DepthInfinity, repositoryURL, true, false, editor)
+		},
+		func(editor delta.Editor) (ra.Reporter, error) {
+			return session.DoStatus(ctx, "", latest, svn.DepthInfinity, editor)
+		},
+		func(editor delta.Editor) (ra.Reporter, error) {
+			return session.DoDiff(ctx, latest, "", svn.DepthInfinity, false, true, repositoryURL, editor)
+		},
+	}
+	for _, start := range operations {
+		reporter, err := start(discardEditor{})
+		if err != nil {
+			return err
+		}
+		if err := reporter.SetPath(ctx, "", 0, svn.DepthInfinity, true, ""); err != nil {
+			return err
+		}
+		if err := reporter.FinishReport(ctx); err != nil {
+			return err
+		}
+	}
+	if err := session.Replay(ctx, 1, 0, true, discardEditor{}); err != nil {
+		return err
+	}
+	if err := session.ReplayRange(ctx, 1, latest, 0, true,
+		func(svn.Revnum, svn.Props) (delta.Editor, error) { return discardEditor{}, nil },
+		func(svn.Revnum, svn.Props, delta.Editor) error { return nil }); err != nil {
+		return err
+	}
+	return session.Reparent(ctx, repositoryURL+"/trunk")
+}
+
+type discardEditor struct{}
+
+func (discardEditor) SetTargetRevision(context.Context, svn.Revnum) error { return nil }
+func (discardEditor) OpenRoot(context.Context, svn.Revnum) (delta.DirEditor, error) {
+	return discardDir{}, nil
+}
+func (discardEditor) CloseEdit(context.Context) error { return nil }
+func (discardEditor) AbortEdit(context.Context) error { return nil }
+
+type discardDir struct{}
+
+func (discardDir) DeleteEntry(context.Context, string, svn.Revnum) error { return nil }
+func (discardDir) AddDirectory(context.Context, string, *delta.CopySource) (delta.DirEditor, error) {
+	return discardDir{}, nil
+}
+func (discardDir) OpenDirectory(context.Context, string, svn.Revnum) (delta.DirEditor, error) {
+	return discardDir{}, nil
+}
+func (discardDir) ChangeProp(context.Context, string, []byte) error { return nil }
+func (discardDir) AbsentDirectory(context.Context, string) error    { return nil }
+func (discardDir) AddFile(context.Context, string, *delta.CopySource) (delta.FileEditor, error) {
+	return discardFile{}, nil
+}
+func (discardDir) OpenFile(context.Context, string, svn.Revnum) (delta.FileEditor, error) {
+	return discardFile{}, nil
+}
+func (discardDir) AbsentFile(context.Context, string) error { return nil }
+func (discardDir) Close(context.Context) error              { return nil }
+
+type discardFile struct{}
+
+func (discardFile) ApplyTextDelta(context.Context, *svn.Checksum) (delta.WindowHandler, error) {
+	return delta.WindowHandlerFunc(func(*delta.Window) error { return nil }), nil
+}
+func (discardFile) ChangeProp(context.Context, string, []byte) error { return nil }
+func (discardFile) Close(context.Context, *svn.Checksum) error       { return nil }
 
 func normalizeClientIdentity(stream []byte) []byte {
 	marker := []byte(":SVN/")

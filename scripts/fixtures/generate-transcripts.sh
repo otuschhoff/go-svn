@@ -18,6 +18,13 @@ fi
 "$PROJECT_ROOT/scripts/fixtures/record-rasvn.sh" \
 	"$SVN" "$SVNSERVE" "$REPO" "$TRANSCRIPT_DIR/rasvn/info.transcript"
 
+go run ./scripts/fixtures/rasvn-record \
+	-svn "$SVN" \
+	-svnserve "$SVNSERVE" \
+	-repository "$REPO" \
+	-operation read-matrix \
+	-output "$TRANSCRIPT_DIR/rasvn/read-matrix.transcript"
+
 cat >"$TRANSCRIPT_DIR/dav/options-request.xml" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
 <D:options xmlns:D="DAV:"><D:activity-collection-set/></D:options>

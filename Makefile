@@ -1,7 +1,7 @@
 GO ?= go
 GOFMT ?= gofmt
 
-.PHONY: all build check test race lint vet format-check fuzz integration fixtures fixtures-check
+.PHONY: all build check test race lint vet format-check fuzz integration fixtures fixtures-check transcripts
 
 all: check
 
@@ -49,3 +49,5 @@ fixtures:
 
 fixtures-check:
 	./scripts/fixtures/check.sh
+
+transcripts: fixtures

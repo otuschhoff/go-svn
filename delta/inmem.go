@@ -30,6 +30,14 @@ func NewTreeBuilder() *TreeBuilder {
 	return &TreeBuilder{root: newDirectoryNode()}
 }
 
+// NewTreeBuilderFrom continues editing an existing tree and takes ownership of root.
+func NewTreeBuilderFrom(root *TreeNode) *TreeBuilder {
+	if root == nil {
+		root = newDirectoryNode()
+	}
+	return &TreeBuilder{root: root}
+}
+
 func (builder *TreeBuilder) Root() *TreeNode { return builder.root }
 
 func (builder *TreeBuilder) SetTargetRevision(_ context.Context, revision svn.Revnum) error {

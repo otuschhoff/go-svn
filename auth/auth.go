@@ -64,12 +64,18 @@ type Baton struct {
 }
 
 func (baton *Baton) GetCredentials(ctx context.Context, kind Kind, realm, username string) (*Credentials, error) {
+	return baton.GetCredentialsAfter(ctx, kind, realm, username)
+}
+
+// GetCredentialsAfter returns the next credential after rejected, skipping
+// providers that return the same username and secret.
+func (baton *Baton) GetCredentialsAfter(ctx context.Context, kind Kind, realm, username string, rejected ...*Credentials) (*Credentials, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	for _, provider := range baton.Providers {
 		credentials, err := provider.Get(ctx, kind, realm, username)
-		if err == nil && credentials != nil {
+		if err == nil && credentials != nil && !containsCredentials(rejected, credentials) {
 			return credentials, nil
 		}
 		if err != nil && !errors.Is(err, svn.ErrAuthnCredsUnavailable) {
@@ -84,12 +90,28 @@ func (baton *Baton) GetCredentials(ctx context.Context, kind Kind, realm, userna
 		return nil, fmt.Errorf("%w: %s for %q", svn.ErrAuthnProvidersExhausted, kind, realm)
 	}
 	credentials.Kind, credentials.Realm = kind, realm
+	if containsCredentials(rejected, credentials) {
+		return nil, fmt.Errorf("%w: %s for %q", svn.ErrAuthnProvidersExhausted, kind, realm)
+	}
 	if credentials.MaySave && baton.StorePasswords {
 		if saveErr := baton.save(ctx, credentials); saveErr != nil && !errors.Is(saveErr, svn.ErrAuthnCredsNotSaved) {
 			return nil, saveErr
 		}
 	}
 	return credentials, nil
+}
+
+func sameCredentials(first, second *Credentials) bool {
+	return first != nil && second != nil && first.Kind == second.Kind && first.Username == second.Username && first.Password == second.Password && first.Certificate == second.Certificate
+}
+
+func containsCredentials(credentials []*Credentials, candidate *Credentials) bool {
+	for _, item := range credentials {
+		if sameCredentials(item, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func (baton *Baton) SaveCredentials(ctx context.Context, credentials *Credentials) error {
