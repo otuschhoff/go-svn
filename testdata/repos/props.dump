@@ -1,0 +1,156 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000003
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 123
+Content-length: 123
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 19
+add node properties
+PROPS-END
+
+Node-path: trunk
+Node-kind: dir
+Node-action: change
+Prop-content-length: 74
+Content-length: 74
+
+K 18
+svn:global-ignores
+V 8
+*.cache
+
+K 10
+svn:ignore
+V 6
+*.tmp
+
+PROPS-END
+
+
+Node-path: trunk/props.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 987929d61c9b69f0c6406b840aa77fd8
+Text-content-sha1: 97059669371ed42a72435dc0266a432db4348ccc
+Prop-content-length: 71
+Text-content-length: 18
+Content-length: 89
+
+K 11
+custom:text
+V 12
+custom value
+K 13
+svn:eol-style
+V 2
+LF
+PROPS-END
+line one
+line two
+
+
+Revision-number: 3
+Prop-content-length: 126
+Content-length: 126
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-04T00:00:00.000000Z
+
+K 7
+svn:log
+V 22
+delete custom property
+PROPS-END
+
+Node-path: trunk/props.txt
+Node-kind: file
+Node-action: change
+Prop-content-length: 36
+Content-length: 36
+
+K 13
+svn:eol-style
+V 2
+LF
+PROPS-END
+
+

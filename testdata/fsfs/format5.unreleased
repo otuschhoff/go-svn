@@ -1,0 +1,3 @@
+FSFS format 5 was understood only by Subversion 1.7 development builds and was
+never released. No valid format-5 repository is generated. See
+subversion/libsvn_fs_fs/structure, section "Filesystem formats".

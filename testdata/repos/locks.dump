@@ -1,0 +1,99 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000006
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 121
+Content-length: 121
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 17
+add lockable file
+PROPS-END
+
+Node-path: trunk/locked.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: d60e8d7672292469c358cde4244c29d8
+Text-content-sha1: fc5aef58e9516406cb30168f4471b918ba2afb4f
+Prop-content-length: 36
+Text-content-length: 8
+Content-length: 44
+
+K 14
+svn:needs-lock
+V 1
+*
+PROPS-END
+lock me
+
+

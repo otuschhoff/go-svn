@@ -1,0 +1,164 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000002
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 119
+Content-length: 119
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 15
+add copy source
+PROPS-END
+
+Node-path: trunk/source.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 1c2a2139ada95c37601a7d0d64c84e16
+Text-content-sha1: ecf642018c35af1b915f9c355311ffa18c65e15d
+Prop-content-length: 10
+Text-content-length: 12
+Content-length: 22
+
+PROPS-END
+copy source
+
+
+Revision-number: 3
+Prop-content-length: 124
+Content-length: 124
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-04T00:00:00.000000Z
+
+K 7
+svn:log
+V 20
+copy trunk to branch
+PROPS-END
+
+Node-path: branches/feature
+Node-kind: dir
+Node-action: add
+Node-copyfrom-rev: 1
+Node-copyfrom-path: trunk
+
+
+Node-path: branches/feature/source.txt
+Node-kind: file
+Node-action: add
+Node-copyfrom-rev: 2
+Node-copyfrom-path: trunk/source.txt
+Text-copy-source-md5: 1c2a2139ada95c37601a7d0d64c84e16
+Text-copy-source-sha1: ecf642018c35af1b915f9c355311ffa18c65e15d
+
+
+Revision-number: 4
+Prop-content-length: 120
+Content-length: 120
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-05T00:00:00.000000Z
+
+K 7
+svn:log
+V 16
+move copied file
+PROPS-END
+
+Node-path: branches/feature/moved.txt
+Node-kind: file
+Node-action: add
+Node-copyfrom-rev: 3
+Node-copyfrom-path: branches/feature/source.txt
+Text-copy-source-md5: 1c2a2139ada95c37601a7d0d64c84e16
+Text-copy-source-sha1: ecf642018c35af1b915f9c355311ffa18c65e15d
+
+
+Node-path: branches/feature/source.txt
+Node-action: delete
+
+

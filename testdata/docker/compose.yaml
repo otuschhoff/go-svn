@@ -1,0 +1,25 @@
+services:
+  svnserve:
+    build: .
+    command: ["svnserve", "--foreground", "-d", "--listen-host", "0.0.0.0", "-r", "/var/svn"]
+    ports:
+      - "${GOSVN_SVNSERVE_PORT:-3690}:3690"
+    volumes:
+      - "${GOSVN_REPOS_ROOT:?set GOSVN_REPOS_ROOT}:/var/svn"
+
+  httpd:
+    build: .
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        mkdir -p /run/go-svn
+        htpasswd -bc /run/go-svn/passwd "$${GOSVN_USERNAME:-fixture}" "$${GOSVN_PASSWORD:-fixture}"
+        exec apache2ctl -D FOREGROUND
+    environment:
+      GOSVN_USERNAME: "${GOSVN_USERNAME:-fixture}"
+      GOSVN_PASSWORD: "${GOSVN_PASSWORD:-fixture}"
+    ports:
+      - "${GOSVN_HTTPD_PORT:-8080}:8080"
+    volumes:
+      - "${GOSVN_REPOS_ROOT:?set GOSVN_REPOS_ROOT}:/var/svn"

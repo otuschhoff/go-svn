@@ -8,7 +8,7 @@ their inputs, deliverables, acceptance tests and explicit non-goals.
 ## 0. Working rules for implementing agents
 
 1. **One work item per PR/branch.** Do not start the next item until
-   `make check` is green (`CGO_ENABLED=0 go build ./... && go vet ./... && go test -race ./...`).
+   `make check` is green (`CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`). Run `make race` separately on Linux with `CGO_ENABLED=1`; Go's race runtime cannot be built with CGO disabled.
 2. **Tests first.** Write the tests named in *Acceptance* before the code.
    Golden files go under `testdata/<package>/`; generate them with a
    `go:generate`-able script or from reference tools and commit them.
@@ -60,9 +60,9 @@ different agents once P2/P3 exist.
 
 | Item | Deliverables | Acceptance |
 |------|--------------|------------|
-| 0.1 Module & CI | `go.mod` (go 1.23), `Makefile` (`check`, `test`, `fuzz`, `integration`, `fixtures`, `lint`), `.github/workflows/ci.yml` (matrix linux/darwin/windows × CGO_ENABLED=0; `-race` on linux; `staticcheck`; `govulncheck`; cross-compile windows/arm64), `LICENSE`, `NOTICE`. | CI green on empty module; `CGO_ENABLED=0` set in every job. |
+| 0.1 Module & CI | `go.mod` (go 1.23), `Makefile` (`check`, `test`, `fuzz`, `integration`, `fixtures`, `lint`), `.github/workflows/ci.yml` (matrix linux/darwin/windows × CGO_ENABLED=0; `-race` on linux with CGO enabled as required by the Go runtime; `staticcheck`; `govulncheck`; cross-compile windows/arm64), `LICENSE`, `NOTICE`. | CI green on empty module; all normal build, test, lint, cross-compile and integration jobs set `CGO_ENABLED=0`; only the isolated race job sets `CGO_ENABLED=1`. |
 | 0.2 testutil skeleton | `internal/testutil`: `TempDir`, `Golden(t, name, got)` with `-update` flag, `Must`, `FindTool(name, env)` (svnadmin/svn/svnserve/httpd discovery, returns skip reason), `SkipUnlessIntegration(t)`. | Unit tests for golden update flow. |
-| 0.3 Fixture pipeline | `testdata/README.md` describing every fixture and how it is regenerated; `scripts/fixtures/*.sh` that (given svn tools) generate dumps, FSFS repos for formats 1–8 (using `svnadmin create --compatible-version`), and transcripts. Commit outputs. | `make fixtures` is idempotent; fixtures small (< 5 MiB total). |
+| 0.3 Fixture pipeline | `testdata/README.md` describing every fixture and how it is regenerated; `scripts/fixtures/*.sh` that (given svn tools) generate dumps, FSFS repos for every released format 1–4 and 6–8 (using `svnadmin create --compatible-version`), an explicit marker for unreleased format 5, and transcripts. Commit outputs. | `make fixtures` is idempotent; fixtures small (< 5 MiB total). |
 | 0.4 Integration harness | `internal/testutil/servers`: `StartSvnserve(t, reposRoot, opts)` (random port, `svnserve.conf`, `passwd`), `StartHTTPD(t, ...)` (generated `httpd.conf` with `mod_dav_svn`, Basic + Digest realms, optional TLS with self-signed cert, `SVNAllowBulkUpdates` variants), `TunnelScript(t)` (shell script that execs `svnserve -t -r root`, used as `SVN_SSH`), `docker compose` fallback under `testdata/docker/`. | `go test -tags integration ./internal/testutil/servers` starts and stops each server; skips cleanly when tools missing. |
 
 ---

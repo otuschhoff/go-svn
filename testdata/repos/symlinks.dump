@@ -1,0 +1,144 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000008
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 121
+Content-length: 121
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 17
+add symbolic link
+PROPS-END
+
+Node-path: trunk/link.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 2865a91b547e18088eda2a1bfed9e454
+Text-content-sha1: 336681c56b28e4b4c405b166fb70e014b931495e
+Prop-content-length: 33
+Text-content-length: 15
+Content-length: 48
+
+K 11
+svn:special
+V 1
+*
+PROPS-END
+link target.txt
+
+Node-path: trunk/target.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 80fb1dd0b20823f1d83e10d25840e2e4
+Text-content-sha1: d5a93703cc2236959330d80bcae6192612880077
+Prop-content-length: 10
+Text-content-length: 7
+Content-length: 17
+
+PROPS-END
+target
+
+
+Revision-number: 3
+Prop-content-length: 135
+Content-length: 135
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-04T00:00:00.000000Z
+
+K 7
+svn:log
+V 31
+replace symbolic link with file
+PROPS-END
+
+Node-path: trunk/link.txt
+Node-kind: file
+Node-action: replace
+Text-content-md5: ac16ef303366bb85621776a07a6362d4
+Text-content-sha1: a9b32e52c66e4781f686e1486fb28201e6a196a2
+Prop-content-length: 10
+Text-content-length: 14
+Content-length: 24
+
+PROPS-END
+ordinary file
+
+

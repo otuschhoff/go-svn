@@ -1,0 +1,121 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000007
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 133
+Content-length: 133
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 29
+add unicode and escaped paths
+PROPS-END
+
+Node-path: trunk/café.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: c783930cfbb0d66af60d2809818b0ca2
+Text-content-sha1: dd78967419f86bf3e2ba4585dd196d68264dfad2
+Prop-content-length: 10
+Text-content-length: 7
+Content-length: 17
+
+PROPS-END
+accent
+
+
+Node-path: trunk/hash#percent%.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 4a2c70fc0f089474b23d85269eea8e71
+Text-content-sha1: c88953b68f678f6944915f00f9f0e3ee67c868fc
+Prop-content-length: 10
+Text-content-length: 9
+Content-length: 19
+
+PROPS-END
+reserved
+
+
+Node-path: trunk/space name.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: f945ece6b359adf187927f1b8063610f
+Text-content-sha1: bdd24c786308b032eef45465c838e0dac918f455
+Prop-content-length: 10
+Text-content-length: 6
+Content-length: 16
+
+PROPS-END
+space
+
+

@@ -1,0 +1,177 @@
+SVN-fs-dump-format-version: 2
+
+UUID: 00000000-0000-0000-0000-000000000001
+
+Revision-number: 0
+Prop-content-length: 57
+Content-length: 57
+
+K 8
+svn:date
+V 28
+2020-01-01T00:00:00.000000Z
+
+PROPS-END
+
+Revision-number: 1
+Prop-content-length: 134
+Content-length: 134
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-02T00:00:00.000000Z
+
+K 7
+svn:log
+V 30
+create standard project layout
+PROPS-END
+
+Node-path: branches
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: tags
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Node-path: trunk
+Node-kind: dir
+Node-action: add
+Prop-content-length: 10
+Content-length: 10
+
+PROPS-END
+
+
+Revision-number: 2
+Prop-content-length: 133
+Content-length: 133
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-03T00:00:00.000000Z
+
+K 7
+svn:log
+V 29
+add text and executable files
+PROPS-END
+
+Node-path: trunk/README.txt
+Node-kind: file
+Node-action: add
+Text-content-md5: 383494ae09eed0d1f2b7cd7b94d17fd1
+Text-content-sha1: 812cd7c2a18b6a54a512586deb4fd61efe9c3290
+Prop-content-length: 36
+Text-content-length: 15
+Content-length: 51
+
+K 13
+svn:eol-style
+V 2
+LF
+PROPS-END
+go-svn fixture
+
+
+Node-path: trunk/run.sh
+Node-kind: file
+Node-action: add
+Text-content-md5: c010747891a546c5f640b6cf4feba3ad
+Text-content-sha1: 79b67c21ed310793d3088ff4e0e06b182e3a4d6e
+Prop-content-length: 67
+Text-content-length: 42
+Content-length: 109
+
+K 14
+svn:executable
+V 1
+*
+K 12
+svn:keywords
+V 8
+Revision
+PROPS-END
+#!/bin/sh
+printf "revision: $Revision$\n"
+
+
+Revision-number: 3
+Prop-content-length: 115
+Content-length: 115
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-04T00:00:00.000000Z
+
+K 7
+svn:log
+V 11
+modify text
+PROPS-END
+
+Node-path: trunk/README.txt
+Node-kind: file
+Node-action: change
+Text-content-md5: 946d88743440f9c4276149fb520953ac
+Text-content-sha1: 6d13637b76d3667655948976ae40b2dd3efc40d6
+Text-content-length: 27
+Content-length: 27
+
+go-svn fixture
+second line
+
+
+Revision-number: 4
+Prop-content-length: 121
+Content-length: 121
+
+K 10
+svn:author
+V 8
+fixture
+
+K 8
+svn:date
+V 28
+2020-01-05T00:00:00.000000Z
+
+K 7
+svn:log
+V 17
+delete executable
+PROPS-END
+
+Node-path: trunk/run.sh
+Node-action: delete
+
+
