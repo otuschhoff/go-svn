@@ -2,6 +2,7 @@ package delta
 
 import (
 	"bytes"
+	"compress/zlib"
 	"errors"
 	"io"
 	"testing"
@@ -48,7 +49,7 @@ func TestSvndiffRoundTrip(t *testing.T) {
 		},
 		NewData: newData,
 	}
-	for _, version := range []int{0, 1} {
+	for _, version := range []int{0, 1, 2} {
 		t.Run(string(rune('0'+version)), func(t *testing.T) {
 			var encoded bytes.Buffer
 			encoder, err := NewEncoder(&encoded, version)
@@ -81,6 +82,26 @@ func TestSvndiffRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSvndiffStreamAPI(t *testing.T) {
+	var encoded bytes.Buffer
+	handler := NewSvndiffWriter(&encoded, 1, zlib.BestSpeed)
+	want := []byte("stream contents")
+	if _, err := SendContents(want, handler); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := NewSvndiffReader(bytes.NewReader(encoded.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got bytes.Buffer
+	if _, err := Apply(nil, &got, reader, nil); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got.Bytes(), want) {
+		t.Fatalf("got %q, want %q", got.Bytes(), want)
+	}
+}
+
 func TestSvndiffRejectsMalformedStreams(t *testing.T) {
 	tests := []struct {
 		name string
@@ -101,6 +122,37 @@ func TestSvndiffRejectsMalformedStreams(t *testing.T) {
 			}
 			if !errors.Is(err, test.code) {
 				t.Fatalf("error = %v, want %s", err, test.code)
+			}
+		})
+	}
+}
+
+func TestSvndiffRejectsMalformedCompressedSections(t *testing.T) {
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	_, _ = writer.Write([]byte{0x81})
+	_ = writer.Close()
+	zlibWithTrailingData := append(compressed.Bytes(), 0xff)
+	tests := []struct {
+		name    string
+		version byte
+		section []byte
+	}{
+		{"zlib trailing data", 1, append([]byte{1}, zlibWithTrailingData...)},
+		{"lz4 zero offset", 2, []byte{5, 0x10, 'a', 0, 0}},
+		{"lz4 truncated length", 2, []byte{16, 0xf0}},
+		{"lz4 output mismatch", 2, []byte{2, 0x10, 'a'}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			data := []byte{'S', 'V', 'N', test.version, 0, 0, 1, byte(len(test.section)), 0}
+			data = append(data, test.section...)
+			decoder, err := NewDecoder(bytes.NewReader(data))
+			if err == nil {
+				_, err = decoder.NextWindow()
+			}
+			if !errors.Is(err, svn.ErrSvndiffInvalidCompressedData) {
+				t.Fatalf("error = %v", err)
 			}
 		})
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/oliver-tuschhoff/go-svn/internal/lz4"
 	"github.com/oliver-tuschhoff/go-svn/svn"
 )
 
@@ -30,10 +31,14 @@ func NewDecoder(input io.Reader) (*Decoder, error) {
 	if _, err := io.ReadFull(reader, header); err != nil {
 		return nil, fmt.Errorf("%w: %v", svn.ErrSvndiffInvalidHeader, err)
 	}
-	if !bytes.Equal(header[:3], []byte("SVN")) || header[3] > 1 {
+	if !bytes.Equal(header[:3], []byte("SVN")) || header[3] > 2 {
 		return nil, fmt.Errorf("%w: %q", svn.ErrSvndiffInvalidHeader, header)
 	}
 	return &Decoder{reader: reader, version: header[3]}, nil
+}
+
+func NewSvndiffReader(input io.Reader) (WindowReader, error) {
+	return NewDecoder(input)
 }
 
 func (decoder *Decoder) Version() int { return int(decoder.version) }
@@ -107,7 +112,15 @@ func readSection(reader io.Reader, encodedLength int, version byte, limit int) (
 	if uint64(len(payload)) == originalLength {
 		return append([]byte(nil), payload...), nil
 	}
-	zlibReader, err := zlib.NewReader(bytes.NewReader(payload))
+	if version == 2 {
+		decoded, err := lz4.DecodeBlock(payload, int(originalLength))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", svn.ErrSvndiffInvalidCompressedData, err)
+		}
+		return decoded, nil
+	}
+	payloadReader := bytes.NewReader(payload)
+	zlibReader, err := zlib.NewReader(payloadReader)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", svn.ErrSvndiffInvalidCompressedData, err)
 	}
@@ -118,6 +131,9 @@ func readSection(reader io.Reader, encodedLength int, version byte, limit int) (
 	}
 	if closeErr != nil {
 		return nil, fmt.Errorf("%w: %v", svn.ErrSvndiffInvalidCompressedData, closeErr)
+	}
+	if payloadReader.Len() != 0 {
+		return nil, fmt.Errorf("%w: trailing compressed data", svn.ErrSvndiffInvalidCompressedData)
 	}
 	if uint64(len(decoded)) != originalLength {
 		return nil, fmt.Errorf("%w: decoded section has %d bytes, want %d", svn.ErrSvndiffInvalidCompressedData, len(decoded), originalLength)

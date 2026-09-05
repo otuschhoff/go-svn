@@ -1,6 +1,7 @@
 package delta
 
 import (
+	"bytes"
 	"crypto/md5"
 	"errors"
 	"fmt"
@@ -14,11 +15,23 @@ type WindowReader interface {
 	NextWindow() (*Window, error)
 }
 
-// WindowHandler consumes a window. A nil window marks the end of a stream.
-type WindowHandler func(*Window) error
+// WindowHandler consumes a text delta and is closed at the end of the stream.
+type WindowHandler interface {
+	Window(*Window) error
+	Close() error
+}
+
+// WindowHandlerFunc adapts a function to a WindowHandler.
+type WindowHandlerFunc func(*Window) error
+
+func (handler WindowHandlerFunc) Window(window *Window) error { return handler(window) }
+func (handler WindowHandlerFunc) Close() error                { return handler(nil) }
 
 // Apply streams reconstructed target data to target and returns its MD5.
 func Apply(source io.ReadSeeker, target io.Writer, windows WindowReader, expectedMD5 *svn.Checksum) (svn.Checksum, error) {
+	if source == nil {
+		source = bytes.NewReader(nil)
+	}
 	digest := md5.New()
 	output := io.MultiWriter(target, digest)
 	var sourceView []byte
