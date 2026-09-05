@@ -1,0 +1,125 @@
+package delta
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"testing"
+
+	"github.com/oliver-tuschhoff/go-svn/svn"
+)
+
+func TestDecodeSvndiff0Golden(t *testing.T) {
+	data := []byte{
+		'S', 'V', 'N', 0,
+		0, 12, 16, 7, 1,
+		0x04, 0x00, 0x04, 0x08, 0x81, 0x47, 0x08,
+		'd',
+	}
+	decoder, err := NewDecoder(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	window, err := decoder.NextWindow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ApplyWindow([]byte("aaaabbbbcccc"), *window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "aaaaccccdddddddd" {
+		t.Fatalf("decoded target = %q", got)
+	}
+	if _, err := decoder.NextWindow(); !errors.Is(err, io.EOF) {
+		t.Fatalf("final NextWindow() error = %v", err)
+	}
+}
+
+func TestSvndiffRoundTrip(t *testing.T) {
+	newData := bytes.Repeat([]byte("compressible-data-"), 80)
+	window := Window{
+		SourceOffset: 10,
+		SourceLength: 4,
+		TargetLength: 4 + len(newData),
+		Ops: []Op{
+			{Kind: OpSource, Offset: 0, Length: 4},
+			{Kind: OpNew, Offset: 0, Length: len(newData)},
+		},
+		NewData: newData,
+	}
+	for _, version := range []int{0, 1} {
+		t.Run(string(rune('0'+version)), func(t *testing.T) {
+			var encoded bytes.Buffer
+			encoder, err := NewEncoder(&encoded, version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.WriteWindow(window); err != nil {
+				t.Fatal(err)
+			}
+			if err := encoder.Close(); err != nil {
+				t.Fatal(err)
+			}
+			decoder, err := NewDecoder(bytes.NewReader(encoded.Bytes()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := decoder.NextWindow()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := ApplyWindow([]byte("base"), *decoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := append([]byte("base"), newData...)
+			if !bytes.Equal(got, want) {
+				t.Fatal("round-trip target differs")
+			}
+		})
+	}
+}
+
+func TestSvndiffRejectsMalformedStreams(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+		code svn.Code
+	}{
+		{"bad header", []byte("BAD\x00"), svn.ErrSvndiffInvalidHeader},
+		{"unknown version", []byte("SVN\x03"), svn.ErrSvndiffInvalidHeader},
+		{"truncated header", []byte("SVN\x00\x00"), svn.ErrSvndiffUnexpectedEnd},
+		{"truncated section", []byte("SVN\x00\x00\x00\x01\x01\x00"), svn.ErrSvndiffUnexpectedEnd},
+		{"invalid selector", []byte("SVN\x00\x00\x00\x01\x01\x00\xff"), svn.ErrSvndiffInvalidOps},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			decoder, err := NewDecoder(bytes.NewReader(test.data))
+			if err == nil {
+				_, err = decoder.NextWindow()
+			}
+			if !errors.Is(err, test.code) {
+				t.Fatalf("error = %v, want %s", err, test.code)
+			}
+		})
+	}
+}
+
+func FuzzDecoder(f *testing.F) {
+	f.Add([]byte("SVN\x00"))
+	f.Add([]byte("SVN\x01\x00\x00\x00\x01\x00\x81"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		decoder, err := NewDecoder(bytes.NewReader(data))
+		if err != nil {
+			return
+		}
+		for count := 0; count < 1000; count++ {
+			_, err := decoder.NextWindow()
+			if err != nil {
+				return
+			}
+		}
+		t.Fatal("decoder accepted more than 1000 windows from bounded input")
+	})
+}
