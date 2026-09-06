@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,6 +99,19 @@ func (database *Database) loadRoot(ctx context.Context, discoveredRoot string) e
 
 func (database *Database) RootPath() string       { return database.wcRoot }
 func (database *Database) RepositoryRoot() string { return database.repository.Root }
+
+func (database *Database) Relocate(ctx context.Context, repositoryRoot string) error {
+	repositoryRoot = strings.TrimSuffix(repositoryRoot, "/")
+	parsed, err := url.Parse(repositoryRoot)
+	if err != nil || parsed.Scheme == "" {
+		return fmt.Errorf("%w: %s", svn.ErrRAIllegalURL, repositoryRoot)
+	}
+	if _, err := database.sql.ExecContext(ctx, `UPDATE REPOSITORY SET root=? WHERE id=?`, repositoryRoot, database.repository.ID); err != nil {
+		return err
+	}
+	database.repository.Root = repositoryRoot
+	return nil
+}
 func (database *Database) RepositoryUUID() string { return database.repository.UUID }
 
 func (database *Database) localRelpath(targetPath string) (string, error) {

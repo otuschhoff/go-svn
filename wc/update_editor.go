@@ -219,6 +219,9 @@ func (editor *updateEditor) copySourceNode(ctx context.Context, source *delta.Co
 		&row.symlinkTarget, &row.changedRevision, &row.changedDate, &row.changedAuthor,
 		&row.translatedSize, &row.lastModified, &row.fileExternal,
 	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

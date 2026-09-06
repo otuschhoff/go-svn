@@ -7,6 +7,7 @@ import (
 	_ "github.com/otuschhoff/go-svn/ra/ralocal"
 	_ "github.com/otuschhoff/go-svn/radav"
 	_ "github.com/otuschhoff/go-svn/rasvn"
+	"github.com/otuschhoff/go-svn/svn/notify"
 	"github.com/otuschhoff/go-svn/wc"
 )
 
@@ -15,6 +16,12 @@ type Client struct {
 }
 
 func New(callbacks *ra.Callbacks) *Client { return &Client{Callbacks: callbacks} }
+
+func (client *Client) notify(event notify.Notify) {
+	if client.Callbacks != nil && client.Callbacks.Notify != nil {
+		client.Callbacks.Notify(event)
+	}
+}
 
 func (client *Client) openWorkingCopy(ctx context.Context, targetPath string) (*wc.Database, ra.Session, error) {
 	database, err := wc.Open(ctx, targetPath, wc.Options{Writable: true})

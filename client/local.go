@@ -3,35 +3,74 @@ package client
 import (
 	"context"
 
+	"github.com/otuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn/notify"
 	"github.com/otuschhoff/go-svn/wc"
 )
 
 func (client *Client) Add(ctx context.Context, targetPath string, options wc.AddOptions) error {
-	return withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Add(ctx, targetPath, options) })
+	err := withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Add(ctx, targetPath, options) })
+	if err == nil {
+		client.notify(notify.Notify{Action: notify.ActionCommitAdded, Path: targetPath})
+	}
+	return err
 }
 
 func (client *Client) Mkdir(ctx context.Context, targetPath string, parents bool) error {
-	return withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Mkdir(ctx, targetPath, parents) })
+	err := withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Mkdir(ctx, targetPath, parents) })
+	if err == nil {
+		client.notify(notify.Notify{Action: notify.ActionCommitAdded, Path: targetPath, Kind: svn.NodeDir})
+	}
+	return err
 }
 
 func (client *Client) Delete(ctx context.Context, targetPath string, options wc.DeleteOptions) error {
-	return withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Delete(ctx, targetPath, options) })
+	err := withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.Delete(ctx, targetPath, options) })
+	if err == nil {
+		client.notify(notify.Notify{Action: notify.ActionCommitDeleted, Path: targetPath})
+	}
+	return err
 }
 
 func (client *Client) Copy(ctx context.Context, sourcePath, destinationPath string) error {
-	return withDatabase(ctx, sourcePath, func(database *wc.Database) error { return database.Copy(ctx, sourcePath, destinationPath) })
+	err := withDatabase(ctx, sourcePath, func(database *wc.Database) error { return database.Copy(ctx, sourcePath, destinationPath) })
+	if err == nil {
+		client.notify(notify.Notify{Action: notify.ActionCommitAdded, Path: destinationPath})
+	}
+	return err
 }
 
 func (client *Client) Move(ctx context.Context, sourcePath, destinationPath string, force bool) error {
-	return withDatabase(ctx, sourcePath, func(database *wc.Database) error { return database.Move(ctx, sourcePath, destinationPath, force) })
+	err := withDatabase(ctx, sourcePath, func(database *wc.Database) error { return database.Move(ctx, sourcePath, destinationPath, force) })
+	if err == nil {
+		client.notify(notify.Notify{Action: notify.ActionCommitDeleted, Path: sourcePath})
+		client.notify(notify.Notify{Action: notify.ActionCommitAdded, Path: destinationPath})
+	}
+	return err
 }
 
 func (client *Client) SetProperty(ctx context.Context, targetPath, name string, value []byte, force bool) error {
-	return withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.SetProperty(ctx, targetPath, name, value, force) })
+	err := withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.SetProperty(ctx, targetPath, name, value, force) })
+	if err == nil {
+		action := notify.ActionPropertyModified
+		if value == nil {
+			action = notify.ActionPropertyDeleted
+		}
+		client.notify(notify.Notify{Action: action, Path: targetPath})
+	}
+	return err
 }
 
 func (client *Client) SetChangelist(ctx context.Context, targetPath, changelist string) error {
-	return withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.SetChangelist(ctx, targetPath, changelist) })
+	err := withDatabase(ctx, targetPath, func(database *wc.Database) error { return database.SetChangelist(ctx, targetPath, changelist) })
+	if err == nil {
+		action := notify.ActionChangelistSet
+		if changelist == "" {
+			action = notify.ActionChangelistClear
+		}
+		client.notify(notify.Notify{Action: action, Path: targetPath})
+	}
+	return err
 }
 
 func (client *Client) Revert(ctx context.Context, targetPath string, options wc.RevertOptions) error {

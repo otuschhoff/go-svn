@@ -5,10 +5,12 @@ import (
 
 	"github.com/otuschhoff/go-svn/ra"
 	"github.com/otuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn/notify"
 	"github.com/otuschhoff/go-svn/wc"
 )
 
 func (client *Client) Checkout(ctx context.Context, repositoryURL, destination string, revision svn.Revnum, options wc.UpdateOptions) (svn.Revnum, error) {
+	options.Notify = client.combineNotify(options.Notify)
 	session, _, err := ra.Open(ctx, repositoryURL, client.Callbacks)
 	if err != nil {
 		return svn.InvalidRevnum, err
@@ -27,6 +29,7 @@ func (client *Client) Checkout(ctx context.Context, repositoryURL, destination s
 }
 
 func (client *Client) Update(ctx context.Context, targetPath string, revision svn.Revnum, options wc.UpdateOptions) (svn.Revnum, error) {
+	options.Notify = client.combineNotify(options.Notify)
 	database, session, err := client.openWorkingCopy(ctx, targetPath)
 	if err != nil {
 		return svn.InvalidRevnum, err
@@ -37,6 +40,7 @@ func (client *Client) Update(ctx context.Context, targetPath string, revision sv
 }
 
 func (client *Client) Switch(ctx context.Context, targetPath, switchURL string, revision svn.Revnum, options wc.UpdateOptions) (svn.Revnum, error) {
+	options.Notify = client.combineNotify(options.Notify)
 	database, session, err := client.openWorkingCopy(ctx, targetPath)
 	if err != nil {
 		return svn.InvalidRevnum, err
@@ -44,4 +48,13 @@ func (client *Client) Switch(ctx context.Context, targetPath, switchURL string, 
 	defer database.Close()
 	defer session.Close()
 	return database.Switch(ctx, session, targetPath, switchURL, revision, options)
+}
+
+func (client *Client) combineNotify(existing notify.Func) notify.Func {
+	return func(event notify.Notify) {
+		if existing != nil {
+			existing(event)
+		}
+		client.notify(event)
+	}
 }
