@@ -43,16 +43,19 @@ func openSession(ctx context.Context, parsed *url.URL, callbacks *ra.Callbacks) 
 		return nil, "", err
 	}
 	wireURL := *parsed
-	if wireURL.User != nil {
-		wireURL.User = url.User(wireURL.User.Username())
-	}
+	wireURL.User = nil
 	info, err := conn.handshake(ctx, wireURL.String())
 	if err != nil {
 		_ = conn.Close()
 		return nil, "", err
 	}
+	repositoryURL := info.repositoryURL
+	if repository, parseErr := url.Parse(repositoryURL); parseErr == nil {
+		repository.User = nil
+		repositoryURL = repository.String()
+	}
 	session := &Session{
-		conn: conn, url: wireURL.String(), repositoryURL: info.repositoryURL,
+		conn: conn, url: wireURL.String(), repositoryURL: repositoryURL,
 		uuid: info.uuid, capabilities: info.capabilities,
 	}
 	return session, session.url, nil
@@ -905,7 +908,7 @@ func parseDirent(items []Item, path string) (*svn.Dirent, error) {
 }
 
 func parseLock(items []Item) (*svn.Lock, error) {
-	if len(items) < 6 || items[0].Kind != StringKind || items[1].Kind != StringKind || items[2].Kind != StringKind {
+	if len(items) < 6 || items[0].Kind != StringKind || items[1].Kind != StringKind || items[2].Kind != StringKind || items[3].Kind != ListKind || items[4].Kind != StringKind || items[5].Kind != ListKind {
 		return nil, malformed("invalid lock description")
 	}
 	lock := &svn.Lock{Path: string(items[0].String), Token: string(items[1].String), Owner: string(items[2].String)}
@@ -913,10 +916,7 @@ func parseLock(items []Item) (*svn.Lock, error) {
 	if len(items[3].List) == 1 {
 		lock.Comment = string(items[3].List[0].String)
 	}
-	if len(items[4].List) != 1 {
-		return nil, malformed("lock has no creation date")
-	}
-	lock.CreationDate, err = time.Parse(time.RFC3339Nano, strings.TrimSpace(string(items[4].List[0].String)))
+	lock.CreationDate, err = time.Parse(time.RFC3339Nano, strings.TrimSpace(string(items[4].String)))
 	if err != nil {
 		return nil, malformedCause(err, "invalid lock creation date")
 	}
@@ -933,8 +933,27 @@ func notImplemented(operation string) error {
 	return fmt.Errorf("%w: ra_svn %s", svn.ErrRANotImplemented, operation)
 }
 
-func (session *Session) ChangeRevProp(context.Context, svn.Revnum, string, []byte, []byte, bool) error {
-	return notImplemented("change revision property")
+func (session *Session) ChangeRevProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	if !revision.IsValid() || name == "" {
+		return fmt.Errorf("%w: invalid revision property change", svn.ErrIncorrectParams)
+	}
+	if session.capabilities[string(ra.CapabilityAtomicRevprops)] {
+		old := []Item{Word(boolWord(dontCare))}
+		if !dontCare && oldValue != nil {
+			old = append(old, String(oldValue))
+		}
+		_, err := session.conn.command(ctx, "change-rev-prop2", Number(uint64(revision)), String([]byte(name)), optionalBytes(value), List(old...))
+		return err
+	}
+	if !dontCare {
+		return fmt.Errorf("%w: server does not support atomic revision property changes", svn.ErrRANotImplemented)
+	}
+	parameters := []Item{Number(uint64(revision)), String([]byte(name))}
+	if value != nil {
+		parameters = append(parameters, String(value))
+	}
+	_, err := session.conn.command(ctx, "change-rev-prop", parameters...)
+	return err
 }
 func (session *Session) DoUpdate(ctx context.Context, revision svn.Revnum, target string, depth svn.Depth, sendCopyfrom, ignoreAncestry bool, editor delta.Editor) (ra.Reporter, error) {
 	return session.startReport(ctx, "update", editor, optionalRevision(revision), String([]byte(target)), Word(boolWord(reportRecurse(depth))), Word(depth.String()), Word(boolWord(sendCopyfrom)), Word(boolWord(ignoreAncestry)))
@@ -948,14 +967,66 @@ func (session *Session) DoStatus(ctx context.Context, target string, revision sv
 func (session *Session) DoDiff(ctx context.Context, revision svn.Revnum, target string, depth svn.Depth, ignoreAncestry, textDeltas bool, versusURL string, editor delta.Editor) (ra.Reporter, error) {
 	return session.startReport(ctx, "diff", editor, optionalRevision(revision), String([]byte(target)), Word(boolWord(reportRecurse(depth))), Word(boolWord(ignoreAncestry)), String([]byte(versusURL)), Word(boolWord(textDeltas)), Word(depth.String()))
 }
-func (session *Session) GetCommitEditor(context.Context, svn.Props, map[string]string, bool, func(*ra.CommitInfo) error) (delta.Editor, error) {
-	return nil, notImplemented("commit")
+func (session *Session) GetCommitEditor(ctx context.Context, revprops svn.Props, lockTokens map[string]string, keepLocks bool, callback func(*ra.CommitInfo) error) (delta.Editor, error) {
+	return session.startCommit(ctx, revprops, lockTokens, keepLocks, callback)
 }
-func (session *Session) Lock(context.Context, map[string]svn.Revnum, string, bool, ra.LockCallback) error {
-	return notImplemented("lock")
+func (session *Session) Lock(ctx context.Context, pathRevisions map[string]svn.Revnum, comment string, steal bool, callback ra.LockCallback) error {
+	paths := sortedRevisionPaths(pathRevisions)
+	if len(paths) == 0 {
+		return nil
+	}
+	entries := make([]Item, 0, len(paths))
+	for _, path := range paths {
+		entries = append(entries, List(String([]byte(path)), optionalRevision(pathRevisions[path])))
+	}
+	err := session.lockMany(ctx, paths, optionalText(comment), steal, List(entries...), callback)
+	if !errors.Is(err, svn.ErrRASvnUnknownCmd) {
+		return err
+	}
+	for _, path := range paths {
+		items, commandErr := session.conn.command(ctx, "lock", String([]byte(path)), optionalText(comment), Word(boolWord(steal)), optionalRevision(pathRevisions[path]))
+		var lock *svn.Lock
+		if commandErr == nil {
+			if len(items) != 1 || items[0].Kind != ListKind {
+				commandErr = malformed("invalid lock response")
+			} else {
+				lock, commandErr = parseLock(items[0].List)
+			}
+		}
+		if callback != nil {
+			if callbackErr := callback(path, lock, commandErr); callbackErr != nil {
+				return callbackErr
+			}
+		} else if commandErr != nil {
+			return commandErr
+		}
+	}
+	return nil
 }
-func (session *Session) Unlock(context.Context, map[string]string, bool, ra.LockCallback) error {
-	return notImplemented("unlock")
+func (session *Session) Unlock(ctx context.Context, pathTokens map[string]string, breakLock bool, callback ra.LockCallback) error {
+	paths := sortedStringPaths(pathTokens)
+	if len(paths) == 0 {
+		return nil
+	}
+	entries := make([]Item, 0, len(paths))
+	for _, path := range paths {
+		entries = append(entries, List(String([]byte(path)), optionalText(pathTokens[path])))
+	}
+	err := session.unlockMany(ctx, paths, breakLock, List(entries...), callback)
+	if !errors.Is(err, svn.ErrRASvnUnknownCmd) {
+		return err
+	}
+	for _, path := range paths {
+		_, commandErr := session.conn.command(ctx, "unlock", String([]byte(path)), optionalText(pathTokens[path]), Word(boolWord(breakLock)))
+		if callback != nil {
+			if callbackErr := callback(path, nil, commandErr); callbackErr != nil {
+				return callbackErr
+			}
+		} else if commandErr != nil {
+			return commandErr
+		}
+	}
+	return nil
 }
 func (session *Session) Replay(ctx context.Context, revision, lowWaterMark svn.Revnum, sendDeltas bool, editor delta.Editor) error {
 	return session.conn.streamCommand(ctx, "replay", func() error {
@@ -1003,6 +1074,4 @@ func (session *Session) ReplayRange(ctx context.Context, start, end, lowWaterMar
 }
 func (session *Session) Close() error { return session.conn.Close() }
 
-func reportRecurse(depth svn.Depth) bool {
-	return depth == svn.DepthUnknown || depth == svn.DepthInfinity
-}
+func reportRecurse(depth svn.Depth) bool { return depth == svn.DepthUnknown || depth > svn.DepthFiles }

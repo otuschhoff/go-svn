@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -332,6 +333,159 @@ func TestAuthenticatedReadSession(t *testing.T) {
 	defer session.Close()
 	if revision, err := session.LatestRevision(ctx); err != nil || revision != 0 {
 		t.Fatalf("latest revision=%d error=%v", revision, err)
+	}
+}
+
+func TestWriteSessionAgainstSvnserve(t *testing.T) {
+	testutil.SkipUnlessIntegration(t)
+	svnadmin := testutil.RequireTool(t, "svnadmin", "GOSVN_SVNADMIN")
+	svnClient := testutil.RequireTool(t, "svn", "GOSVN_SVN")
+	repository := filepath.Join(t.TempDir(), "repo")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v:\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "hooks", "pre-revprop-change"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := servers.StartSvnserve(t, repository, servers.SvnserveOptions{})
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(server.Username, server.Password)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, _, err := ra.Open(ctx, parsed.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	commitFile := func(message, content string, base svn.Revnum, lockTokens map[string]string) error {
+		editor, err := session.GetCommitEditor(ctx, svn.Props{"svn:log": []byte(message), "custom:commit": []byte("yes")}, lockTokens, false, nil)
+		if err != nil {
+			return err
+		}
+		root, err := editor.OpenRoot(ctx, base)
+		if err != nil {
+			return err
+		}
+		var file delta.FileEditor
+		if base == 0 {
+			file, err = root.AddFile(ctx, "written.txt", nil)
+		} else {
+			file, err = root.OpenFile(ctx, "written.txt", base)
+		}
+		if err != nil {
+			return err
+		}
+		windows, err := file.ApplyTextDelta(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if err := windows.Window(&delta.Window{TargetLength: len(content), Ops: []delta.Op{{Kind: delta.OpNew, Length: len(content)}}, NewData: []byte(content)}); err != nil {
+			return err
+		}
+		if err := windows.Close(); err != nil {
+			return err
+		}
+		checksum := svn.Sum(svn.ChecksumMD5, []byte(content))
+		if err := file.Close(ctx, &checksum); err != nil {
+			return err
+		}
+		if err := root.Close(ctx); err != nil {
+			return err
+		}
+		return editor.CloseEdit(ctx)
+	}
+
+	if err := commitFile("created by go-svn", "first\n", 0, nil); err != nil {
+		t.Fatalf("initial commit: %v\nsvnserve:\n%s", err, server.Output())
+	}
+	logOutput, err := exec.Command(svnClient, "log", "-v", "--xml", server.URL).CombinedOutput()
+	if err != nil || !bytes.Contains(logOutput, []byte("created by go-svn")) || !bytes.Contains(logOutput, []byte("/written.txt")) {
+		t.Fatalf("svn log -v --xml: %v:\n%s", err, logOutput)
+	}
+	if output, err := exec.Command(svnadmin, "verify", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin verify: %v:\n%s", err, output)
+	}
+	if err := session.ChangeRevProp(ctx, 1, "custom:reviewed", []byte("true"), nil, false); err != nil {
+		t.Fatal(err)
+	}
+	value, found, err := session.RevProp(ctx, 1, "custom:reviewed")
+	if err != nil || !found || string(value) != "true" {
+		t.Fatalf("changed revprop=%q found=%v error=%v", value, found, err)
+	}
+	var lock *svn.Lock
+	if err := session.Lock(ctx, map[string]svn.Revnum{"written.txt": 1}, "write test", false, func(_ string, value *svn.Lock, callbackErr error) error {
+		lock = value
+		return callbackErr
+	}); err != nil || lock == nil {
+		t.Fatalf("lock=%#v error=%v", lock, err)
+	}
+	if err := commitFile("locked update", "second\n", 1, map[string]string{"written.txt": lock.Token}); err != nil {
+		t.Fatalf("locked commit: %v", err)
+	}
+	if got, err := session.GetLock(ctx, "written.txt"); err != nil || got != nil {
+		t.Fatalf("lock after commit=%#v error=%v", got, err)
+	}
+	lock = nil
+	if err := session.Lock(ctx, map[string]svn.Revnum{"written.txt": 2}, "unlock test", false, func(_ string, value *svn.Lock, callbackErr error) error {
+		lock = value
+		return callbackErr
+	}); err != nil || lock == nil {
+		t.Fatalf("second lock=%#v error=%v", lock, err)
+	}
+	if err := session.Unlock(ctx, map[string]string{"written.txt": lock.Token}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := session.GetLock(ctx, "written.txt"); err != nil || got != nil {
+		t.Fatalf("lock after unlock=%#v error=%v", got, err)
+	}
+
+	hook := "#!/bin/sh\necho 'blocked by integration hook' >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(repository, "hooks", "pre-commit"), []byte(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = commitFile("must fail", "third\n", 2, nil)
+	if !errors.Is(err, svn.ErrReposHookFailure) || !strings.Contains(err.Error(), "blocked by integration hook") {
+		t.Fatalf("hook rejection error=%v", err)
+	}
+	if latest, latestErr := session.LatestRevision(ctx); latestErr != nil || latest != 2 {
+		t.Fatalf("latest after rejection=%d error=%v", latest, latestErr)
+	}
+}
+
+func TestWriteConformanceAgainstSvnserve(t *testing.T) {
+	testutil.SkipUnlessIntegration(t)
+	svnadmin := testutil.RequireTool(t, "svnadmin", "GOSVN_SVNADMIN")
+	repository := filepath.Join(t.TempDir(), "repo")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v:\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(repository, "hooks", "pre-revprop-change"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := servers.StartSvnserve(t, repository, servers.SvnserveOptions{})
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(server.Username, server.Password)
+	conformance.RunWrites(t, conformance.WriteFixture{
+		Open: func(t *testing.T) ra.Session {
+			session, _, err := ra.Open(context.Background(), parsed.String(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return session
+		},
+		RootURL: strings.TrimSuffix(server.URL, "/"),
+	})
+	if output, err := exec.Command(svnadmin, "verify", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin verify: %v:\n%s", err, output)
 	}
 }
 

@@ -210,7 +210,7 @@ func TestReportRecurseMatchesLegacyDepthSemantics(t *testing.T) {
 		{svn.DepthUnknown, true},
 		{svn.DepthEmpty, false},
 		{svn.DepthFiles, false},
-		{svn.DepthImmediates, false},
+		{svn.DepthImmediates, true},
 		{svn.DepthInfinity, true},
 	} {
 		if got := reportRecurse(test.depth); got != test.want {

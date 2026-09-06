@@ -41,6 +41,7 @@ type Repository struct {
 	uuid      string
 	revisions []Revision
 	locks     map[string]*svn.Lock
+	nextLock  uint64
 }
 
 func NewRepository(rootURL, uuid string) *Repository {
@@ -135,8 +136,23 @@ func (session *Session) RevProp(ctx context.Context, revision svn.Revnum, name s
 	value, ok := props[name]
 	return value, ok, nil
 }
-func (*Session) ChangeRevProp(context.Context, svn.Revnum, string, []byte, []byte, bool) error {
-	return notImplemented("change revision property")
+func (session *Session) ChangeRevProp(_ context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	session.repository.mu.Lock()
+	defer session.repository.mu.Unlock()
+	if !revision.IsValid() || int(revision) >= len(session.repository.revisions) || name == "" {
+		return fmt.Errorf("%w: revision property", svn.ErrIncorrectParams)
+	}
+	props := session.repository.revisions[revision].Props
+	current, exists := props[name]
+	if !dontCare && (exists != (oldValue != nil) || !bytes.Equal(current, oldValue)) {
+		return fmt.Errorf("%w: revision property %s changed", svn.ErrFSPropBasevalueMismatch, name)
+	}
+	if value == nil {
+		delete(props, name)
+	} else {
+		props[name] = append([]byte(nil), value...)
+	}
+	return nil
 }
 
 func (session *Session) CheckPath(_ context.Context, name string, revision svn.Revnum) (svn.NodeKind, error) {
@@ -403,14 +419,71 @@ func (session *Session) DoDiff(_ context.Context, revision svn.Revnum, target st
 	return session.newReporter(revision, target, editor)
 }
 
-func (*Session) GetCommitEditor(context.Context, svn.Props, map[string]string, bool, func(*ra.CommitInfo) error) (delta.Editor, error) {
-	return nil, notImplemented("commit")
+func (session *Session) GetCommitEditor(_ context.Context, props svn.Props, lockTokens map[string]string, keepLocks bool, callback func(*ra.CommitInfo) error) (delta.Editor, error) {
+	return session.newCommitEditor(props, lockTokens, keepLocks, callback)
 }
-func (*Session) Lock(context.Context, map[string]svn.Revnum, string, bool, ra.LockCallback) error {
-	return notImplemented("lock")
+func (session *Session) Lock(_ context.Context, pathRevisions map[string]svn.Revnum, comment string, steal bool, callback ra.LockCallback) error {
+	paths := make([]string, 0, len(pathRevisions))
+	for name := range pathRevisions {
+		paths = append(paths, name)
+	}
+	sort.Strings(paths)
+	for _, name := range paths {
+		fullPath := "/" + join(session.base, name)
+		session.repository.mu.Lock()
+		node := findNode(session.repository.revisions[len(session.repository.revisions)-1].Root, strings.TrimPrefix(fullPath, "/"))
+		var lock *svn.Lock
+		var itemErr error
+		if node == nil || node.Kind != svn.NodeFile {
+			itemErr = fmt.Errorf("%w: %s", svn.ErrFSNotFound, name)
+		} else if pathRevisions[name].IsValid() && node.CreatedRev > pathRevisions[name] {
+			itemErr = fmt.Errorf("%w: %s", svn.ErrFSOutOfDate, name)
+		} else if existing := session.repository.locks[fullPath]; existing != nil && !steal {
+			itemErr = fmt.Errorf("%w: %s", svn.ErrFSPathAlreadyLocked, name)
+		} else {
+			session.repository.nextLock++
+			lock = &svn.Lock{Path: fullPath, Token: fmt.Sprintf("opaquelocktoken:inmem-%d", session.repository.nextLock), Owner: "inmem", Comment: comment, CreationDate: time.Now().UTC()}
+			session.repository.locks[fullPath] = lock
+		}
+		session.repository.mu.Unlock()
+		if callback != nil {
+			if err := callback(name, cloneLock(lock), itemErr); err != nil {
+				return err
+			}
+		} else if itemErr != nil {
+			return itemErr
+		}
+	}
+	return nil
 }
-func (*Session) Unlock(context.Context, map[string]string, bool, ra.LockCallback) error {
-	return notImplemented("unlock")
+func (session *Session) Unlock(_ context.Context, pathTokens map[string]string, breakLock bool, callback ra.LockCallback) error {
+	paths := make([]string, 0, len(pathTokens))
+	for name := range pathTokens {
+		paths = append(paths, name)
+	}
+	sort.Strings(paths)
+	for _, name := range paths {
+		fullPath := "/" + join(session.base, name)
+		session.repository.mu.Lock()
+		lock := session.repository.locks[fullPath]
+		var itemErr error
+		if lock == nil {
+			itemErr = fmt.Errorf("%w: %s", svn.ErrFSNoSuchLock, name)
+		} else if !breakLock && pathTokens[name] != lock.Token {
+			itemErr = fmt.Errorf("%w: %s", svn.ErrFSBadLockToken, name)
+		} else {
+			delete(session.repository.locks, fullPath)
+		}
+		session.repository.mu.Unlock()
+		if callback != nil {
+			if err := callback(name, nil, itemErr); err != nil {
+				return err
+			}
+		} else if itemErr != nil {
+			return itemErr
+		}
+	}
+	return nil
 }
 func (session *Session) GetLock(_ context.Context, name string) (*svn.Lock, error) {
 	session.repository.mu.RLock()

@@ -1,4 +1,4 @@
-// Package conformance contains a reusable read-only ra.Session test suite.
+// Package conformance contains reusable ra.Session read and write test suites.
 package conformance
 
 import (
