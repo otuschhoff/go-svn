@@ -33,7 +33,7 @@ var capabilityURIs = map[string]ra.Capability{
 	"log-revprops": ra.CapabilityLogRevprops, "partial-replay": ra.CapabilityPartialReplay,
 	"atomic-revprops": ra.CapabilityAtomicRevprops, "inherited-props": ra.CapabilityInheritedProps,
 	"ephemeral-txnprops": ra.CapabilityEphemeralTxnprops, "reverse-file-revs": ra.CapabilityFileRevsReverse,
-	"list": ra.CapabilityList,
+	"list": ra.CapabilityList, "svndiff1": ra.CapabilitySvndiff1, "svndiff2": ra.CapabilitySvndiff2,
 }
 
 func discover(ctx context.Context, transport *transport, rawURL string) (ServerInfo, string, error) {

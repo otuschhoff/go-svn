@@ -32,12 +32,18 @@ func newTransport(callbacks *ra.Callbacks, host string) (*transport, error) {
 	if callbacks != nil && callbacks.HTTP != nil {
 		copy := *callbacks.HTTP
 		installRedirectPolicy(&copy)
+		if hasHTTPAuthProvider(callbacks) {
+			copy.Transport = newAuthRoundTripper(copy.Transport, &callbacks.Auth)
+		}
 		return &transport{client: &copy}, nil
 	}
 	httpTransport := http.DefaultTransport.(*http.Transport).Clone()
 	client := &http.Client{Transport: httpTransport}
 	installRedirectPolicy(client)
 	if callbacks == nil || callbacks.Config == nil {
+		if hasHTTPAuthProvider(callbacks) {
+			client.Transport = newAuthRoundTripper(client.Transport, &callbacks.Auth)
+		}
 		return &transport{client: client}, nil
 	}
 	servers := callbacks.Config
@@ -102,7 +108,14 @@ func newTransport(callbacks *ra.Callbacks, host string) (*transport, error) {
 		httpTransport.TLSClientConfig.VerifyConnection = verifier.verifyConnection
 		client.Transport = &trustRoundTripper{transport: httpTransport, verifier: verifier}
 	}
+	if hasHTTPAuthProvider(callbacks) {
+		client.Transport = newAuthRoundTripper(client.Transport, &callbacks.Auth)
+	}
 	return &transport{client: client}, nil
+}
+
+func hasHTTPAuthProvider(callbacks *ra.Callbacks) bool {
+	return callbacks != nil && (len(callbacks.Auth.Providers) > 0 || callbacks.Auth.Prompt.Simple != nil)
 }
 
 const (
@@ -288,11 +301,31 @@ func splitAuthorityFiles(value string) []string {
 }
 
 func (transport *transport) request(ctx context.Context, method, rawURL string, body []byte, headers http.Header) (*http.Response, error) {
-	request, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader(body))
+	getBody := func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	return transport.requestBody(ctx, method, rawURL, getBody, int64(len(body)), headers)
+}
+
+func (transport *transport) requestFile(ctx context.Context, method, rawURL, filename string, headers http.Header) (*http.Response, error) {
+	info, err := os.Stat(filename)
 	if err != nil {
+		return nil, err
+	}
+	getBody := func() (io.ReadCloser, error) { return os.Open(filename) }
+	return transport.requestBody(ctx, method, rawURL, getBody, info.Size(), headers)
+}
+
+func (transport *transport) requestBody(ctx context.Context, method, rawURL string, getBody func() (io.ReadCloser, error), length int64, headers http.Header) (*http.Response, error) {
+	body, err := getBody()
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, rawURL, body)
+	if err != nil {
+		body.Close()
 		return nil, fmt.Errorf("%w: %v", svn.ErrRADAVCreatingRequest, err)
 	}
-	request.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
+	request.ContentLength = length
+	request.GetBody = getBody
 	request.Header.Set("User-Agent", userAgent)
 	for name, values := range headers {
 		for _, value := range values {

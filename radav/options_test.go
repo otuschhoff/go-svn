@@ -33,7 +33,7 @@ func TestOpenDiscoversRedirectedRepository(t *testing.T) {
 		writer.Header().Set("SVN-Youngest-Rev", "12")
 		writer.Header().Set("SVN-Me-Resource", "/repo/!svn/me")
 		writer.Header().Set("SVN-Rev-Root-Stub", "/repo/!svn/rvr")
-		writer.Header().Set("DAV", "1, 2, http://subversion.tigris.org/xmlns/dav/svn/depth, http://subversion.tigris.org/xmlns/dav/svn/mergeinfo")
+		writer.Header().Set("DAV", "1, 2, http://subversion.tigris.org/xmlns/dav/svn/depth, http://subversion.tigris.org/xmlns/dav/svn/mergeinfo, http://subversion.tigris.org/xmlns/dav/svn/svndiff2")
 		writer.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -56,6 +56,9 @@ func TestOpenDiscoversRedirectedRepository(t *testing.T) {
 	}
 	if capable, _ := session.HasCapability(context.Background(), ra.CapabilityDepth); !capable {
 		t.Fatal("depth capability not discovered")
+	}
+	if capable, _ := session.HasCapability(context.Background(), ra.CapabilitySvndiff2); !capable {
+		t.Fatal("svndiff2 capability not discovered")
 	}
 }
 

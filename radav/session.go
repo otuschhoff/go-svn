@@ -140,8 +140,8 @@ func (session *Session) RevProp(ctx context.Context, revision svn.Revnum, name s
 	value, found := props[name]
 	return value, found, nil
 }
-func (*Session) ChangeRevProp(context.Context, svn.Revnum, string, []byte, []byte, bool) error {
-	return notImplemented("change revision property")
+func (session *Session) ChangeRevProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	return session.changeRevProp(ctx, revision, name, value, oldValue, dontCare)
 }
 func (session *Session) CheckPath(ctx context.Context, name string, revision svn.Revnum) (svn.NodeKind, error) {
 	entry, err := session.Stat(ctx, name, revision)
@@ -229,17 +229,13 @@ func (session *Session) List(ctx context.Context, name string, revision svn.Revn
 	}
 	return walk(name)
 }
-func (*Session) GetCommitEditor(context.Context, svn.Props, map[string]string, bool, func(*ra.CommitInfo) error) (delta.Editor, error) {
-	return nil, notImplemented("commit")
+func (session *Session) GetCommitEditor(_ context.Context, revprops svn.Props, lockTokens map[string]string, keepLocks bool, callback func(*ra.CommitInfo) error) (delta.Editor, error) {
+	return session.startCommit(revprops, lockTokens, keepLocks, callback)
 }
-func (*Session) Lock(context.Context, map[string]svn.Revnum, string, bool, ra.LockCallback) error {
-	return notImplemented("lock")
+func (session *Session) Lock(ctx context.Context, pathRevisions map[string]svn.Revnum, comment string, steal bool, callback ra.LockCallback) error {
+	return session.lock(ctx, pathRevisions, comment, steal, callback)
 }
-func (*Session) Unlock(context.Context, map[string]string, bool, ra.LockCallback) error {
-	return notImplemented("unlock")
+func (session *Session) Unlock(ctx context.Context, pathTokens map[string]string, breakLock bool, callback ra.LockCallback) error {
+	return session.unlock(ctx, pathTokens, breakLock, callback)
 }
 func (*Session) Close() error { return nil }
-
-func notImplemented(operation string) error {
-	return fmt.Errorf("%w: ra_dav %s", svn.ErrRANotImplemented, operation)
-}
