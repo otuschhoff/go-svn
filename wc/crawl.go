@@ -80,8 +80,14 @@ func (database *Database) Crawl(ctx context.Context, targetPath string, depth sv
 		if parent == "." {
 			parent = ""
 		}
-		expectedReposPath := path.Join(parentRepositoryPath(nodes, parent), path.Base(row.relpath))
-		switched := index != 0 && expectedReposPath != row.reposPath
+		parentReposPath := parentRepositoryPath(nodes, parent)
+		if row.relpath != "" && parentReposPath == "" {
+			if err := database.sql.QueryRowContext(ctx, `SELECT repos_path FROM NODES_BASE WHERE wc_id=? AND local_relpath=?`, database.wcID, parent).Scan(&parentReposPath); err != nil {
+				return err
+			}
+		}
+		expectedReposPath := path.Join(parentReposPath, path.Base(row.relpath))
+		switched := row.relpath != "" && expectedReposPath != row.reposPath
 		parentRevision, parentKnown := revisions[parent]
 		mustReport := index == 0 || switched || !parentKnown || row.revision != parentRevision || item.lock != "" || row.presence == string(PresenceIncomplete) || (row.kind == svn.NodeDir.String() && nodeDepth != svn.DepthInfinity)
 		if mustReport {

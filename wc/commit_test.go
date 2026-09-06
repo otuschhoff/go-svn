@@ -12,9 +12,148 @@ import (
 	"testing"
 
 	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/ra/inmem"
 	_ "github.com/otuschhoff/go-svn/ra/ralocal"
 	"github.com/otuschhoff/go-svn/svn"
 )
+
+func TestCommitInMemoryRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://wc-commit", "wc-commit-uuid")
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"modified": inmem.File([]byte("old\n")),
+				"deleted":  inmem.File([]byte("deleted\n")),
+				"directory": inmem.Directory(map[string]*inmem.Node{
+					"child": inmem.File([]byte("child\n")),
+				}),
+			}),
+		}),
+	})
+	session, err := repository.Open("memory://wc-commit/trunk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := os.WriteFile(filepath.Join(working, "modified"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	added := filepath.Join(working, "added")
+	if err := os.WriteFile(added, []byte("added\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Add(ctx, added, AddOptions{AutoProps: map[string]svn.Props{"added": {"custom": []byte("value")}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Delete(ctx, filepath.Join(working, "deleted"), DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetProperty(ctx, working, "root-property", []byte("root-value"), false); err != nil {
+		t.Fatal(err)
+	}
+	info, err := database.Commit(ctx, session, working, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("mixed")}, Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Revision != 2 {
+		t.Fatalf("commit revision = %d", info.Revision)
+	}
+	for name, want := range map[string]string{"modified": "new\n", "added": "added\n"} {
+		var contents bytes.Buffer
+		if _, _, err := session.GetFile(ctx, name, 2, &contents, false); err != nil || contents.String() != want {
+			t.Fatalf("repository %s = %q, error = %v", name, contents.String(), err)
+		}
+	}
+	if kind, err := session.CheckPath(ctx, "deleted", 2); err != nil || kind != svn.NodeNone {
+		t.Fatalf("deleted kind = %v, error = %v", kind, err)
+	}
+	_, addedProperties, err := session.GetFile(ctx, "added", 2, nil, true)
+	if err != nil || string(addedProperties["custom"]) != "value" {
+		t.Fatalf("added properties = %#v, error = %v", addedProperties, err)
+	}
+	_, _, rootProperties, err := session.GetDir(ctx, "", 2, 0)
+	if err != nil || string(rootProperties["root-property"]) != "root-value" {
+		t.Fatalf("root properties = %#v, error = %v", rootProperties, err)
+	}
+	if err := database.Status(ctx, working, StatusOptions{Depth: svn.DepthInfinity}, func(status *Status) error {
+		if status.NodeStatus != StatusNormal || status.PropertyStatus != StatusNormal {
+			t.Fatalf("post-commit status = %#v", status)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	copied := filepath.Join(working, "copied")
+	if err := database.Copy(ctx, filepath.Join(working, "modified"), copied); err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(working, "moved")
+	if err := database.Move(ctx, filepath.Join(working, "directory"), moved, false); err != nil {
+		t.Fatal(err)
+	}
+	info, err = database.Commit(ctx, session, working, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("copy and move")}, Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Revision != 3 {
+		t.Fatalf("copy/move revision = %d", info.Revision)
+	}
+	for name, want := range map[string]string{"copied": "new\n", "moved/child": "child\n"} {
+		var contents bytes.Buffer
+		if _, _, err := session.GetFile(ctx, name, 3, &contents, false); err != nil || contents.String() != want {
+			t.Fatalf("repository %s = %q, error = %v", name, contents.String(), err)
+		}
+	}
+	if kind, err := session.CheckPath(ctx, "directory", 3); err != nil || kind != svn.NodeNone {
+		t.Fatalf("moved source kind = %v, error = %v", kind, err)
+	}
+	if err := database.Delete(ctx, copied, DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(copied, []byte("replacement\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Add(ctx, copied, AddOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = database.Commit(ctx, session, copied, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("replace")}, Depth: svn.DepthEmpty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Revision != 4 {
+		t.Fatalf("replacement revision = %d", info.Revision)
+	}
+	var replacement bytes.Buffer
+	if _, _, err := session.GetFile(ctx, "copied", 4, &replacement, false); err != nil || replacement.String() != "replacement\n" {
+		t.Fatalf("replacement = %q, error = %v", replacement.String(), err)
+	}
+	special := filepath.Join(working, "special")
+	if err := os.Symlink("modified", special); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Add(ctx, special, AddOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	info, err = database.Commit(ctx, session, special, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("special")}, Depth: svn.DepthEmpty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Revision != 5 {
+		t.Fatalf("special revision = %d", info.Revision)
+	}
+	var specialContents bytes.Buffer
+	_, specialProperties, err := session.GetFile(ctx, "special", 5, &specialContents, true)
+	if err != nil || specialContents.String() != "link modified" || string(specialProperties["svn:special"]) != "*" {
+		t.Fatalf("special = %q, properties = %#v, error = %v", specialContents.String(), specialProperties, err)
+	}
+}
 
 func TestCommitWorkingCopyRoundTrip(t *testing.T) {
 	svnadmin := requireTool(t, "svnadmin")

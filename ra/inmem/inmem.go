@@ -406,17 +406,25 @@ func (session *Session) GetDeletedRev(_ context.Context, name string, peg, end s
 	return svn.InvalidRevnum, nil
 }
 
-func (session *Session) DoUpdate(_ context.Context, revision svn.Revnum, target string, _ svn.Depth, _ bool, _ bool, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, editor)
+func (session *Session) DoUpdate(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, _ bool, _ bool, editor delta.Editor) (ra.Reporter, error) {
+	return session.newReporter(revision, target, join(session.base, target), depth, editor, false)
 }
-func (session *Session) DoSwitch(_ context.Context, revision svn.Revnum, target string, _ svn.Depth, _ string, _ bool, _ bool, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, editor)
+func (session *Session) DoSwitch(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, switchURL string, _ bool, _ bool, editor delta.Editor) (ra.Reporter, error) {
+	source, ok := relativeURL(session.repository.rootURL, switchURL)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", svn.ErrRAIllegalURL, switchURL)
+	}
+	return session.newReporter(revision, target, source, depth, editor, true)
 }
-func (session *Session) DoStatus(_ context.Context, target string, revision svn.Revnum, _ svn.Depth, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, editor)
+func (session *Session) DoStatus(_ context.Context, target string, revision svn.Revnum, depth svn.Depth, editor delta.Editor) (ra.Reporter, error) {
+	return session.newReporter(revision, target, join(session.base, target), depth, editor, false)
 }
-func (session *Session) DoDiff(_ context.Context, revision svn.Revnum, target string, _ svn.Depth, _ bool, _ bool, _ string, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, editor)
+func (session *Session) DoDiff(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, _ bool, _ bool, versusURL string, editor delta.Editor) (ra.Reporter, error) {
+	source, ok := relativeURL(session.repository.rootURL, versusURL)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", svn.ErrRAIllegalURL, versusURL)
+	}
+	return session.newReporter(revision, target, source, depth, editor, true)
 }
 
 func (session *Session) GetCommitEditor(_ context.Context, props svn.Props, lockTokens map[string]string, keepLocks bool, callback func(*ra.CommitInfo) error) (delta.Editor, error) {
@@ -562,12 +570,15 @@ func (session *Session) node(name string, revision svn.Revnum) (*Node, svn.Revnu
 }
 
 type report struct {
-	session  *Session
-	revision svn.Revnum
-	target   string
-	editor   delta.Editor
-	entries  map[string]reportEntry
-	done     bool
+	session        *Session
+	revision       svn.Revnum
+	target         string
+	source         string
+	editor         delta.Editor
+	depth          svn.Depth
+	explicitSource bool
+	entries        map[string]reportEntry
+	done           bool
 }
 
 type reportEntry struct {
@@ -576,11 +587,11 @@ type reportEntry struct {
 	empty, deleted bool
 }
 
-func (session *Session) newReporter(revision svn.Revnum, target string, editor delta.Editor) (ra.Reporter, error) {
+func (session *Session) newReporter(revision svn.Revnum, target, source string, depth svn.Depth, editor delta.Editor, explicitSource bool) (ra.Reporter, error) {
 	if editor == nil {
 		return nil, fmt.Errorf("%w: nil editor", svn.ErrIncorrectParams)
 	}
-	return &report{session: session, revision: revision, target: target, editor: editor, entries: make(map[string]reportEntry)}, nil
+	return &report{session: session, revision: revision, target: target, source: source, editor: editor, depth: depth, explicitSource: explicitSource, entries: make(map[string]reportEntry)}, nil
 }
 func (report *report) SetPath(_ context.Context, name string, revision svn.Revnum, _ svn.Depth, startEmpty bool, _ string) error {
 	report.entries[clean(name)] = reportEntry{revision: revision, source: join(join(report.session.base, report.target), name), empty: startEmpty}
@@ -603,11 +614,16 @@ func (report *report) FinishReport(ctx context.Context) error {
 		return fmt.Errorf("%w: report complete", svn.ErrIncorrectParams)
 	}
 	report.done = true
-	target, _, err := report.session.node(report.target, report.revision)
+	value, err := report.session.revision(report.revision)
 	if err != nil {
 		return err
 	}
-	base := Directory()
+	incomingSource := report.source
+	if root, ok := report.entries[""]; ok && root.source != "" && !report.explicitSource {
+		incomingSource = root.source
+	}
+	target := findNode(value.Root, incomingSource)
+	var base *Node
 	if root, ok := report.entries[""]; ok && !root.deleted && !root.empty {
 		value, revisionErr := report.session.revision(root.revision)
 		if revisionErr != nil {
@@ -625,6 +641,9 @@ func (report *report) FinishReport(ctx context.Context) error {
 		}
 	}
 	sort.Slice(names, func(i, j int) bool { return strings.Count(names[i], "/") < strings.Count(names[j], "/") })
+	if base == nil && len(names) != 0 {
+		base = Directory()
+	}
 	for _, name := range names {
 		entry := report.entries[name]
 		if entry.deleted {
@@ -649,7 +668,25 @@ func (report *report) FinishReport(ctx context.Context) error {
 		}
 		setNode(base, name, node)
 	}
-	return driveDiff(ctx, report.editor, base, target, report.revision)
+	editor := delta.DepthFilter(report.editor, report.depth, "")
+	if target != nil && target.Kind != svn.NodeDir || base != nil && base.Kind != svn.NodeDir {
+		name := path.Base(report.target)
+		if report.target == "" {
+			name = path.Base(report.source)
+		}
+		baseChildren := make(map[string]*Node)
+		if base != nil {
+			baseChildren[name] = base
+		}
+		targetChildren := make(map[string]*Node)
+		if target != nil {
+			targetChildren[name] = target
+		}
+		base = Directory(baseChildren)
+		target = Directory(targetChildren)
+		editor = delta.DepthFilter(report.editor, report.depth, name)
+	}
+	return driveDiff(ctx, editor, base, target, report.revision)
 }
 func (report *report) AbortReport(context.Context) error {
 	if report.done {
@@ -660,6 +697,9 @@ func (report *report) AbortReport(context.Context) error {
 }
 
 func driveDiff(ctx context.Context, editor delta.Editor, old, current *Node, revision svn.Revnum) error {
+	if err := editor.SetTargetRevision(ctx, revision); err != nil {
+		return err
+	}
 	root, err := editor.OpenRoot(ctx, revision)
 	if err != nil {
 		return err

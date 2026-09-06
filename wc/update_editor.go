@@ -28,6 +28,7 @@ type UpdateOptions struct {
 	Force           bool
 	Accept          ConflictChoice
 	SwitchURL       string
+	switchTarget    string
 	UseCommitTimes  bool
 	Notify          notify.Func
 }
@@ -43,14 +44,15 @@ const (
 )
 
 type updateEditor struct {
-	database       *Database
-	anchor         string
-	repositoryBase string
-	options        UpdateOptions
-	target         svn.Revnum
-	aborted        bool
-	deleted        map[string]bool
-	copySources    map[string]nodeRow
+	database         *Database
+	anchor           string
+	repositoryBase   string
+	repositoryTarget string
+	options          UpdateOptions
+	target           svn.Revnum
+	aborted          bool
+	deleted          map[string]bool
+	copySources      map[string]nodeRow
 }
 
 type updateDirectory struct {
@@ -107,7 +109,7 @@ func NewUpdateEditor(ctx context.Context, database *Database, anchorPath string,
 	if options.SwitchURL != "" {
 		repositoryBase = sessionPath(database.repository.Root, options.SwitchURL)
 	}
-	return &updateEditor{database: database, anchor: anchor, repositoryBase: repositoryBase, options: options, target: svn.InvalidRevnum, deleted: make(map[string]bool), copySources: make(map[string]nodeRow)}, nil
+	return &updateEditor{database: database, anchor: anchor, repositoryBase: repositoryBase, repositoryTarget: options.switchTarget, options: options, target: svn.InvalidRevnum, deleted: make(map[string]bool), copySources: make(map[string]nodeRow)}, nil
 }
 
 func (editor *updateEditor) SetTargetRevision(_ context.Context, revision svn.Revnum) error {
@@ -149,6 +151,9 @@ func (editor *updateEditor) localPath(editorPath string) string {
 	return filepath.Join(editor.database.wcRoot, filepath.FromSlash(editor.relpath(editorPath)))
 }
 func (editor *updateEditor) repositoryPath(editorPath string) string {
+	if editor.repositoryTarget != "" && editorPath == editor.repositoryTarget {
+		return editor.repositoryBase
+	}
 	return path.Join(editor.repositoryBase, editorPath)
 }
 

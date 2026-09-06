@@ -57,7 +57,16 @@ func (database *Database) Update(ctx context.Context, session ra.Session, target
 		return svn.InvalidRevnum, err
 	}
 	editorAnchor := targetPath
-	if info, infoErr := database.Info(ctx, targetPath); infoErr == nil && info.Kind != svn.NodeDir {
+	info, infoErr := database.Info(ctx, targetPath)
+	isFile := infoErr == nil && info.Kind != svn.NodeDir
+	if infoErr != nil {
+		kind, checkErr := session.CheckPath(ctx, target, revision)
+		if checkErr != nil {
+			return svn.InvalidRevnum, checkErr
+		}
+		isFile = kind == svn.NodeFile
+	}
+	if isFile {
 		editorAnchor = filepath.Dir(targetPath)
 	}
 	if options.SetDepth != nil {
@@ -94,15 +103,18 @@ func (database *Database) Switch(ctx context.Context, session ra.Session, target
 			return svn.InvalidRevnum, err
 		}
 	}
-	options.SwitchURL = switchURL
 	target, err := database.localRelpath(targetPath)
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
 	editorAnchor := targetPath
-	if info, infoErr := database.Info(ctx, targetPath); infoErr == nil && info.Kind != svn.NodeDir {
+	info, infoErr := database.Info(ctx, targetPath)
+	isFile := infoErr == nil && info.Kind != svn.NodeDir
+	if isFile {
 		editorAnchor = filepath.Dir(targetPath)
+		options.switchTarget = filepath.Base(targetPath)
 	}
+	options.SwitchURL = switchURL
 	if options.SetDepth != nil {
 		options.Depth = *options.SetDepth
 		if err := database.checkDepthPrune(ctx, target, options.Depth, options.Force); err != nil {

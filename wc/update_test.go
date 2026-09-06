@@ -12,9 +12,274 @@ import (
 
 	"github.com/otuschhoff/go-svn/delta"
 	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/ra/inmem"
 	_ "github.com/otuschhoff/go-svn/ra/ralocal"
 	"github.com/otuschhoff/go-svn/svn"
 )
+
+func TestInMemorySparseCheckoutAndUpdate(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://wc-update", "wc-update-uuid")
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"root-file": inmem.File([]byte("one\n")),
+				"dir":       inmem.Directory(map[string]*inmem.Node{"child": inmem.File([]byte("child one\n"))}),
+			}),
+		}),
+	})
+	session, err := repository.Open("memory://wc-update/trunk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthFiles})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if contents, err := os.ReadFile(filepath.Join(working, "root-file")); err != nil || string(contents) != "one\n" {
+		t.Fatalf("root file = %q, error = %v", contents, err)
+	}
+	if _, err := os.Stat(filepath.Join(working, "dir")); !os.IsNotExist(err) {
+		t.Fatalf("depth-files directory exists, error = %v", err)
+	}
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"root-file": inmem.File([]byte("two\n")),
+				"added":     inmem.File([]byte("added\n")),
+				"dir":       inmem.Directory(map[string]*inmem.Node{"child": inmem.File([]byte("child two\n"))}),
+			}),
+		}),
+	})
+	if kind, err := session.CheckPath(ctx, "added", 1); err != nil || kind != svn.NodeNone {
+		t.Fatalf("added at r1 = %v, error = %v", kind, err)
+	}
+	if info, err := database.Info(ctx, working); err != nil || info.Revision != 1 {
+		t.Fatalf("working root before update = %#v, error = %v", info, err)
+	}
+	if _, err := database.Update(ctx, session, working, 2, UpdateOptions{Depth: svn.DepthFiles}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"root-file": "two\n", "added": "added\n"} {
+		contents, err := os.ReadFile(filepath.Join(working, name))
+		if err != nil || string(contents) != want {
+			t.Fatalf("%s = %q, error = %v", name, contents, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(working, "dir")); !os.IsNotExist(err) {
+		t.Fatalf("updated depth-files directory exists, error = %v", err)
+	}
+}
+
+func TestInMemoryCheckoutDepthMatrix(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://wc-depths", "wc-depths-uuid")
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"root-file": inmem.File([]byte("root\n")),
+				"dir":       inmem.Directory(map[string]*inmem.Node{"child": inmem.File([]byte("child\n"))}),
+			}),
+		}),
+	})
+	tests := []struct {
+		name               string
+		depth              svn.Depth
+		rootFile, dir, kid bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, rootFile: true},
+		{name: "immediates", depth: svn.DepthImmediates, rootFile: true, dir: true},
+		{name: "infinity", depth: svn.DepthInfinity, rootFile: true, dir: true, kid: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session, err := repository.Open("memory://wc-depths/trunk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			working := filepath.Join(t.TempDir(), "working")
+			database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: test.depth})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			for name, want := range map[string]bool{
+				"root-file": test.rootFile,
+				"dir":       test.dir,
+				"dir/child": test.kid,
+			} {
+				_, err := os.Lstat(filepath.Join(working, filepath.FromSlash(name)))
+				if exists := err == nil; exists != want || err != nil && !os.IsNotExist(err) {
+					t.Fatalf("%s exists = %t, error = %v, want %t", name, exists, err, want)
+				}
+			}
+			info, err := database.Info(ctx, working)
+			if err != nil || info.Depth != test.depth || info.Revision != 1 {
+				t.Fatalf("root info = %#v, error = %v", info, err)
+			}
+		})
+	}
+}
+
+func TestInMemoryUpdateDepthMatrix(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://wc-update-depths", "wc-update-depths-uuid")
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
+		"trunk": inmem.Directory(map[string]*inmem.Node{
+			"root-file":    inmem.File([]byte("root one\n")),
+			"root-deleted": inmem.File([]byte("delete root\n")),
+			"dir": inmem.Directory(map[string]*inmem.Node{
+				"child":         inmem.File([]byte("child one\n")),
+				"child-deleted": inmem.File([]byte("delete child\n")),
+			}),
+		}),
+	})})
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
+		"trunk": inmem.Directory(map[string]*inmem.Node{
+			"root-file":  inmem.File([]byte("root two\n")),
+			"root-added": inmem.File([]byte("add root\n")),
+			"dir": inmem.Directory(map[string]*inmem.Node{
+				"child":       inmem.File([]byte("child two\n")),
+				"child-added": inmem.File([]byte("add child\n")),
+			}),
+		}),
+	})})
+	tests := []struct {
+		name                       string
+		depth                      svn.Depth
+		updateRoot, updateChildren bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, updateRoot: true},
+		{name: "immediates", depth: svn.DepthImmediates, updateRoot: true},
+		{name: "infinity", depth: svn.DepthInfinity, updateRoot: true, updateChildren: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session, err := repository.Open("memory://wc-update-depths/trunk")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			working := filepath.Join(t.TempDir(), "working")
+			database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthInfinity})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			if _, err := database.Update(ctx, session, working, 2, UpdateOptions{Depth: test.depth}); err != nil {
+				t.Fatal(err)
+			}
+			files := []struct {
+				name, before, after string
+				updated             bool
+			}{
+				{name: "root-file", before: "root one\n", after: "root two\n", updated: test.updateRoot},
+				{name: "root-added", after: "add root\n", updated: test.updateRoot},
+				{name: "root-deleted", before: "delete root\n", updated: test.updateRoot},
+				{name: "dir/child", before: "child one\n", after: "child two\n", updated: test.updateChildren},
+				{name: "dir/child-added", after: "add child\n", updated: test.updateChildren},
+				{name: "dir/child-deleted", before: "delete child\n", updated: test.updateChildren},
+			}
+			for _, file := range files {
+				want := file.before
+				if file.updated {
+					want = file.after
+				}
+				contents, err := os.ReadFile(filepath.Join(working, filepath.FromSlash(file.name)))
+				if want == "" {
+					if !os.IsNotExist(err) {
+						t.Fatalf("%s exists with %q, error = %v", file.name, contents, err)
+					}
+				} else if err != nil || string(contents) != want {
+					t.Fatalf("%s = %q, error = %v, want %q", file.name, contents, err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestInMemorySwitch(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://wc-switch", "wc-switch-uuid")
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"switched":    inmem.Directory(map[string]*inmem.Node{"file": inmem.File([]byte("trunk\n"))}),
+				"target-file": inmem.File([]byte("trunk file\n")),
+			}),
+			"branches": inmem.Directory(map[string]*inmem.Node{
+				"other":       inmem.Directory(map[string]*inmem.Node{"file": inmem.File([]byte("branch\n"))}),
+				"source-file": inmem.File([]byte("branch file\n")),
+			}),
+		}),
+	})
+	session, err := repository.Open("memory://wc-switch/trunk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	target := filepath.Join(working, "switched")
+	if _, err := database.Switch(ctx, session, target, "memory://wc-switch/branches/other", 1, UpdateOptions{Depth: svn.DepthInfinity}); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(target, "file")); err != nil || string(contents) != "branch\n" {
+		t.Fatalf("switched content = %q, error = %v", contents, err)
+	}
+	info, err := database.Info(ctx, target)
+	if err != nil || info.RepositoryPath != "branches/other" {
+		t.Fatalf("switched info = %#v, error = %v", info, err)
+	}
+	fileTarget := filepath.Join(working, "target-file")
+	if _, err := database.Switch(ctx, session, fileTarget, "memory://wc-switch/branches/source-file", 1, UpdateOptions{Depth: svn.DepthEmpty}); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(fileTarget); err != nil || string(contents) != "branch file\n" {
+		t.Fatalf("switched file content = %q, error = %v", contents, err)
+	}
+	info, err = database.Info(ctx, fileTarget)
+	if err != nil || info.RepositoryPath != "branches/source-file" {
+		t.Fatalf("switched file info = %#v, error = %v", info, err)
+	}
+	repository.AddRevision(inmem.Revision{
+		Root: inmem.Directory(map[string]*inmem.Node{
+			"trunk": inmem.Directory(map[string]*inmem.Node{
+				"switched":    inmem.Directory(map[string]*inmem.Node{"file": inmem.File([]byte("trunk two\n"))}),
+				"target-file": inmem.File([]byte("trunk file two\n")),
+			}),
+			"branches": inmem.Directory(map[string]*inmem.Node{
+				"other":       inmem.Directory(map[string]*inmem.Node{"file": inmem.File([]byte("branch two\n"))}),
+				"source-file": inmem.File([]byte("branch file two\n")),
+			}),
+		}),
+	})
+	if _, err := database.Update(ctx, session, target, 2, UpdateOptions{Depth: svn.DepthInfinity}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Update(ctx, session, fileTarget, 2, UpdateOptions{Depth: svn.DepthEmpty}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"switched/file": "branch two\n",
+		"target-file":   "branch file two\n",
+	} {
+		contents, err := os.ReadFile(filepath.Join(working, filepath.FromSlash(name)))
+		if err != nil || string(contents) != want {
+			t.Fatalf("updated switched %s = %q, error = %v", name, contents, err)
+		}
+	}
+}
 
 func TestLargeCheckoutAndAlternatingUpdates(t *testing.T) {
 	svnadmin := requireTool(t, "svnadmin")
