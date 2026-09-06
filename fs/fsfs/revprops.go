@@ -16,6 +16,146 @@ import (
 	"github.com/otuschhoff/go-svn/svn/hashfile"
 )
 
+func (filesystem *FS) ChangeRevisionProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	if name == "" {
+		return fmt.Errorf("%w: empty revision property name", svn.ErrIncorrectParams)
+	}
+	return withWriteLock(ctx, filepath.Join(filesystem.path, "db", "write-lock"), func() error {
+		youngest, err := filesystem.YoungestRevision(ctx)
+		if err != nil {
+			return err
+		}
+		if revision < 0 || revision > youngest {
+			return fmt.Errorf("%w: revision %d", svn.ErrFSNoSuchRevision, revision)
+		}
+		properties, err := filesystem.RevisionProps(ctx, revision)
+		if err != nil {
+			return err
+		}
+		actual, found := properties[name]
+		if !dontCare && (oldValue == nil && found || oldValue != nil && (!found || !bytes.Equal(actual, oldValue))) {
+			return fmt.Errorf("%w: %s", svn.ErrFSPropBasevalueMismatch, name)
+		}
+		if value == nil {
+			delete(properties, name)
+		} else {
+			properties[name] = append([]byte(nil), value...)
+		}
+		var encoded bytes.Buffer
+		if err := hashfile.Write(&encoded, properties); err != nil {
+			return err
+		}
+		packedPath, packed, err := filesystem.revpropWritePath(revision)
+		if err != nil {
+			return err
+		}
+		if !packed {
+			return writeFileAtomic(packedPath, encoded.Bytes(), 0o444)
+		}
+		containerData, err := os.ReadFile(packedPath)
+		if err != nil {
+			return err
+		}
+		container, err := decodePackedString(containerData)
+		if err != nil {
+			return err
+		}
+		container, err = replacePackedRevprop(container, revision, encoded.Bytes())
+		if err != nil {
+			return err
+		}
+		packedData := append(encodePackedUint(uint64(len(container))), container...)
+		return writeFileAtomic(packedPath, packedData, 0o444)
+	})
+}
+
+func (filesystem *FS) revpropWritePath(revision svn.Revnum) (string, bool, error) {
+	base := filepath.Join(filesystem.path, "db", "revprops")
+	if filesystem.format.Layout == LayoutLinear {
+		return filepath.Join(base, strconv.FormatInt(int64(revision), 10)), false, nil
+	}
+	shard := int64(revision) / filesystem.format.ShardSize
+	minimum := int64(0)
+	if filesystem.format.Number >= 6 {
+		var err error
+		minimum, err = readNumber(filepath.Join(filesystem.path, "db", "min-unpacked-rev"))
+		if err != nil {
+			return "", false, err
+		}
+	}
+	if revision == 0 || int64(revision) >= minimum {
+		return filepath.Join(base, strconv.FormatInt(shard, 10), strconv.FormatInt(int64(revision), 10)), false, nil
+	}
+	packDirectory := filepath.Join(base, strconv.FormatInt(shard, 10)+".pack")
+	manifest, err := os.ReadFile(filepath.Join(packDirectory, "manifest"))
+	if err != nil {
+		return "", false, err
+	}
+	files := strings.Fields(string(manifest))
+	firstPacked := shard * filesystem.format.ShardSize
+	if firstPacked == 0 {
+		firstPacked = 1
+	}
+	index := int64(revision) - firstPacked
+	if index < 0 || index >= int64(len(files)) {
+		return "", false, fmt.Errorf("%w: revision %d is missing", svn.ErrFSCorruptRevpropManifest, revision)
+	}
+	return filepath.Join(packDirectory, files[index]), true, nil
+}
+
+func replacePackedRevprop(container []byte, revision svn.Revnum, replacement []byte) ([]byte, error) {
+	reader := bufio.NewReader(bytes.NewReader(container))
+	start, err := readContainerNumber(reader)
+	if err != nil {
+		return nil, err
+	}
+	count, err := readContainerNumber(reader)
+	if err != nil || count <= 0 || revision < svn.Revnum(start) || revision >= svn.Revnum(start+count) {
+		return nil, fmt.Errorf("%w: invalid packed revprop revision range", svn.ErrFSPackedRevpropReadFailure)
+	}
+	sizes := make([]int64, count)
+	for index := range sizes {
+		sizes[index], err = readContainerNumber(reader)
+		if err != nil || sizes[index] < 0 {
+			return nil, fmt.Errorf("%w: invalid packed revprop size", svn.ErrFSPackedRevpropReadFailure)
+		}
+	}
+	separator, err := reader.ReadByte()
+	if err != nil || separator != '\n' {
+		return nil, fmt.Errorf("%w: missing packed revprop header separator", svn.ErrFSPackedRevpropReadFailure)
+	}
+	values := make([][]byte, count)
+	for index, size := range sizes {
+		values[index] = make([]byte, size)
+		if _, err := io.ReadFull(reader, values[index]); err != nil {
+			return nil, fmt.Errorf("%w: truncated packed revprops", svn.ErrFSPackedRevpropReadFailure)
+		}
+	}
+	values[int64(revision)-start] = replacement
+	var result bytes.Buffer
+	fmt.Fprintf(&result, "%d\n%d\n", start, count)
+	for _, value := range values {
+		fmt.Fprintf(&result, "%d\n", len(value))
+	}
+	result.WriteByte('\n')
+	for _, value := range values {
+		result.Write(value)
+	}
+	return result.Bytes(), nil
+}
+
+func encodePackedUint(value uint64) []byte {
+	var encoded [10]byte
+	index := len(encoded)
+	index--
+	encoded[index] = byte(value & 0x7f)
+	for value >>= 7; value != 0; value >>= 7 {
+		index--
+		encoded[index] = byte(value&0x7f) | 0x80
+	}
+	return encoded[index:]
+}
+
 func (filesystem *FS) RevisionProps(ctx context.Context, revision svn.Revnum) (svn.Props, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

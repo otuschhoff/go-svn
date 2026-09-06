@@ -336,8 +336,8 @@ func validateLogicalIndexesReader(reader io.ReaderAt, dataSize int64, locations 
 			return fmt.Errorf("%w: P2L item checksum mismatch", svn.ErrFSCorrupt)
 		}
 	}
-	if end < dataSize {
-		return fmt.Errorf("%w: P2L index does not cover revision data", svn.ErrFSCorrupt)
+	if end < dataSize || len(entries) == 0 || entries[len(entries)-1].kind != 0 {
+		return fmt.Errorf("%w: P2L index does not cover the final page", svn.ErrFSCorrupt)
 	}
 	return nil
 }
@@ -704,8 +704,8 @@ func validateLogicalIndexes(data []byte, locations map[svn.Revnum]map[int64]int6
 			return fmt.Errorf("%w: P2L item checksum mismatch", svn.ErrFSCorrupt)
 		}
 	}
-	if end < int64(len(data)) {
-		return fmt.Errorf("%w: P2L index does not cover revision data", svn.ErrFSCorrupt)
+	if end < int64(len(data)) || len(entries) == 0 || entries[len(entries)-1].kind != 0 {
+		return fmt.Errorf("%w: P2L index does not cover the final page", svn.ErrFSCorrupt)
 	}
 	return nil
 }

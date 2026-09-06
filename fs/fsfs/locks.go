@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +41,131 @@ func (filesystem *FS) GetLock(ctx context.Context, nodePath string) (*svn.Lock, 
 		return nil, nil
 	}
 	return lock, nil
+}
+
+func (filesystem *FS) Lock(ctx context.Context, nodePath, token, owner, comment string, expiration time.Time, steal bool) (*svn.Lock, error) {
+	canonical, err := cleanPath(nodePath)
+	if err != nil {
+		return nil, err
+	}
+	if canonical == "/" || token == "" || owner == "" {
+		return nil, fmt.Errorf("%w: invalid lock parameters", svn.ErrIncorrectParams)
+	}
+	var result *svn.Lock
+	err = withWriteLock(ctx, filepath.Join(filesystem.path, "db", "write-lock"), func() error {
+		existing, err := filesystem.GetLock(ctx, canonical)
+		if err != nil {
+			return err
+		}
+		if existing != nil && !steal {
+			return fmt.Errorf("%w: %s", svn.ErrFSPathAlreadyLocked, canonical)
+		}
+		result = &svn.Lock{Path: canonical, Token: token, Owner: owner, Comment: comment, CreationDate: time.Now().UTC(), ExpirationDate: expiration}
+		values := svn.Props{
+			"path":           []byte(result.Path),
+			"token":          []byte(result.Token),
+			"owner":          []byte(result.Owner),
+			"comment":        []byte(result.Comment),
+			"is_dav_comment": []byte("0"),
+			"creation_date":  []byte(svn.FormatDate(result.CreationDate)),
+		}
+		if !expiration.IsZero() {
+			values["expiration_date"] = []byte(svn.FormatDate(expiration.UTC()))
+		}
+		digest := lockDigest(canonical)
+		if err := os.MkdirAll(filepath.Dir(filesystem.lockPath(digest)), 0o755); err != nil {
+			return err
+		}
+		if err := writeHashAtomic(filesystem.lockPath(digest), values); err != nil {
+			return err
+		}
+		return filesystem.updateLockParents(canonical, digest, true)
+	})
+	return result, err
+}
+
+func (filesystem *FS) Unlock(ctx context.Context, nodePath, token string, breakLock bool) error {
+	canonical, err := cleanPath(nodePath)
+	if err != nil {
+		return err
+	}
+	return withWriteLock(ctx, filepath.Join(filesystem.path, "db", "write-lock"), func() error {
+		lock, err := filesystem.GetLock(ctx, canonical)
+		if err != nil {
+			return err
+		}
+		if lock == nil {
+			return fmt.Errorf("%w: %s", svn.ErrFSNoSuchLock, canonical)
+		}
+		if !breakLock && token != lock.Token {
+			return fmt.Errorf("%w: %s", svn.ErrFSBadLockToken, canonical)
+		}
+		digest := lockDigest(canonical)
+		if err := os.Remove(filesystem.lockPath(digest)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return filesystem.updateLockParents(canonical, digest, false)
+	})
+}
+
+func (filesystem *FS) updateLockParents(nodePath, childDigest string, add bool) error {
+	for parent := filepath.ToSlash(filepath.Dir(nodePath)); ; parent = filepath.ToSlash(filepath.Dir(parent)) {
+		if !strings.HasPrefix(parent, "/") {
+			parent = "/" + parent
+		}
+		digest := lockDigest(parent)
+		name := filesystem.lockPath(digest)
+		values := make(svn.Props)
+		if data, err := os.ReadFile(name); err == nil {
+			values, err = hashfile.Read(bytes.NewReader(data))
+			if err != nil {
+				return err
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		children := strings.Fields(string(values["children"]))
+		set := make(map[string]bool, len(children)+1)
+		for _, child := range children {
+			set[child] = true
+		}
+		if add {
+			set[childDigest] = true
+		} else {
+			delete(set, childDigest)
+		}
+		children = children[:0]
+		for child := range set {
+			children = append(children, child)
+		}
+		sort.Strings(children)
+		if len(children) == 0 {
+			if err := os.Remove(name); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		} else {
+			if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+				return err
+			}
+			values["children"] = []byte(strings.Join(children, "\n") + "\n")
+			if err := writeHashAtomic(name, values); err != nil {
+				return err
+			}
+		}
+		if parent == "/" {
+			break
+		}
+	}
+	return nil
+}
+
+func lockDigest(nodePath string) string {
+	digest := md5.Sum([]byte(nodePath))
+	return hex.EncodeToString(digest[:])
+}
+
+func (filesystem *FS) lockPath(digest string) string {
+	return filepath.Join(filesystem.path, "db", "locks", digest[:3], digest)
 }
 
 func (filesystem *FS) GetLocks(ctx context.Context, nodePath string, depth svn.Depth) (map[string]*svn.Lock, error) {

@@ -103,6 +103,24 @@ func (filesystem *FS) UUID(ctx context.Context) (string, error) {
 	return filesystem.uuid, nil
 }
 
+func (filesystem *FS) SetUUID(ctx context.Context, uuid string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(uuid) == "" || strings.ContainsAny(uuid, "\r\n") {
+		return fmt.Errorf("%w: invalid repository UUID", svn.ErrIncorrectParams)
+	}
+	data := uuid + "\n"
+	if filesystem.instanceID != "" {
+		data += filesystem.instanceID + "\n"
+	}
+	if err := writeFileAtomic(filepath.Join(filesystem.path, "db", "uuid"), []byte(data), 0o666); err != nil {
+		return err
+	}
+	filesystem.uuid = uuid
+	return nil
+}
+
 func (filesystem *FS) YoungestRevision(ctx context.Context) (svn.Revnum, error) {
 	if err := ctx.Err(); err != nil {
 		return svn.InvalidRevnum, err

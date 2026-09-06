@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/otuschhoff/go-svn/fs"
-	_ "github.com/otuschhoff/go-svn/fs/fsfs"
+	"github.com/otuschhoff/go-svn/fs/fsfs"
 	"github.com/otuschhoff/go-svn/mergeinfo"
 	"github.com/otuschhoff/go-svn/ra"
 	"github.com/otuschhoff/go-svn/svn"
@@ -20,6 +20,20 @@ import (
 type Repository struct {
 	path string
 	fs   fs.FS
+}
+
+type CreateOptions struct {
+	Format      int
+	ShardSize   int64
+	Compression fsfs.Compression
+}
+
+func Create(ctx context.Context, repositoryPath string, options CreateOptions) (*Repository, error) {
+	filesystem, err := fsfs.Create(ctx, repositoryPath, fsfs.CreateOptions{Format: options.Format, ShardSize: options.ShardSize, Compression: options.Compression})
+	if err != nil {
+		return nil, err
+	}
+	return &Repository{path: filesystem.Path(), fs: filesystem}, nil
 }
 
 func Open(ctx context.Context, repositoryPath string) (*Repository, error) {
@@ -36,6 +50,16 @@ func (repository *Repository) UUID(ctx context.Context) (string, error) {
 	return repository.fs.UUID(ctx)
 }
 
+func (repository *Repository) applyLoadUUID(ctx context.Context, uuid string, action UUIDAction, youngest svn.Revnum) error {
+	if action == UUIDIgnore || action == UUIDDefault && youngest != 0 {
+		return nil
+	}
+	if filesystem, ok := repository.fs.(*fsfs.FS); ok {
+		return filesystem.SetUUID(ctx, uuid)
+	}
+	return fmt.Errorf("%w: filesystem does not support changing UUID", svn.ErrFSUnsupportedFormat)
+}
+
 func (repository *Repository) Youngest(ctx context.Context) (svn.Revnum, error) {
 	return repository.fs.YoungestRevision(ctx)
 }
@@ -44,12 +68,67 @@ func (repository *Repository) RevisionProps(ctx context.Context, revision svn.Re
 	return repository.fs.RevisionProps(ctx, revision)
 }
 
+func (repository *Repository) ChangeRevisionProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	action := "M"
+	if value == nil {
+		action = "D"
+	} else if properties, err := repository.fs.RevisionProps(ctx, revision); err != nil {
+		return err
+	} else if _, exists := properties[name]; !exists {
+		action = "A"
+	}
+	arguments := []string{repository.path, fmt.Sprint(revision), "", name, action}
+	if _, err := repository.RunHook(ctx, "pre-revprop-change", arguments, value); err != nil {
+		return err
+	}
+	if err := repository.fs.ChangeRevisionProp(ctx, revision, name, value, oldValue, dontCare); err != nil {
+		return err
+	}
+	_, err := repository.RunHook(ctx, "post-revprop-change", arguments, oldValue)
+	return err
+}
+
 func (repository *Repository) GetLock(ctx context.Context, nodePath string) (*svn.Lock, error) {
 	return repository.fs.GetLock(ctx, nodePath)
 }
 
 func (repository *Repository) GetLocks(ctx context.Context, nodePath string, depth svn.Depth) (map[string]*svn.Lock, error) {
 	return repository.fs.GetLocks(ctx, nodePath, depth)
+}
+
+func (repository *Repository) Lock(ctx context.Context, nodePath, token, owner, comment string, expiration time.Time, steal bool) (*svn.Lock, error) {
+	stealArgument := ""
+	if steal {
+		stealArgument = "1"
+	}
+	arguments := []string{repository.path, "/" + strings.TrimPrefix(nodePath, "/"), owner, comment, stealArgument}
+	if output, err := repository.RunHook(ctx, "pre-lock", arguments, nil); err != nil {
+		return nil, err
+	} else if replacement := strings.TrimSpace(output); replacement != "" {
+		token = replacement
+	}
+	lock, err := repository.fs.Lock(ctx, nodePath, token, owner, comment, expiration, steal)
+	if err != nil {
+		return nil, err
+	}
+	_, err = repository.RunHook(ctx, "post-lock", []string{repository.path, owner}, []byte(lock.Path+"\n"))
+	return lock, err
+}
+
+func (repository *Repository) Unlock(ctx context.Context, nodePath, token string, breakLock bool) error {
+	breakArgument := ""
+	if breakLock {
+		breakArgument = "1"
+	}
+	canonicalPath := "/" + strings.TrimPrefix(nodePath, "/")
+	if _, err := repository.RunHook(ctx, "pre-unlock", []string{repository.path, canonicalPath, "", token, breakArgument}, nil); err != nil {
+		return err
+	}
+	if err := repository.fs.Unlock(ctx, nodePath, token, breakLock); err != nil {
+		return err
+	}
+	_, err := repository.RunHook(ctx, "post-unlock", []string{repository.path, ""}, []byte(canonicalPath+"\n"))
+	return err
 }
 
 func (repository *Repository) Root(ctx context.Context, revision svn.Revnum) (fs.Root, svn.Revnum, error) {

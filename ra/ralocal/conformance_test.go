@@ -56,6 +56,29 @@ func TestConformanceAcrossFSFSFormats(t *testing.T) {
 	}
 }
 
+func TestWriteConformance(t *testing.T) {
+	svnadmin, err := exec.LookPath("svnadmin")
+	if err != nil {
+		t.Skip("svnadmin is not installed")
+	}
+	repository := filepath.Join(t.TempDir(), "repository")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v\n%s", err, output)
+	}
+	rootURL := fileURL(repository)
+	conformance.RunWrites(t, conformance.WriteFixture{
+		Open: func(t *testing.T) ra.Session {
+			t.Helper()
+			session, _, err := ra.Open(context.Background(), rootURL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return session
+		},
+		RootURL: rootURL,
+	})
+}
+
 func TestFileURLForms(t *testing.T) {
 	repository := extractFixture(t, 8)
 	root := fileURL(repository)

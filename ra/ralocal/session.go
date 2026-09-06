@@ -3,6 +3,7 @@ package ralocal
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"net/url"
@@ -144,8 +145,12 @@ func (session *Session) RevProp(ctx context.Context, revision svn.Revnum, name s
 	return value, found, nil
 }
 
-func (*Session) ChangeRevProp(context.Context, svn.Revnum, string, []byte, []byte, bool) error {
-	return notImplemented("change revision property")
+func (session *Session) ChangeRevProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
+	resolved, err := session.repository.ResolveRevision(ctx, revision)
+	if err != nil {
+		return err
+	}
+	return session.repository.ChangeRevisionProp(ctx, resolved, name, value, oldValue, dontCare)
 }
 
 func (session *Session) CheckPath(ctx context.Context, name string, revision svn.Revnum) (svn.NodeKind, error) {
@@ -542,16 +547,79 @@ func (session *Session) GetDeletedRev(ctx context.Context, name string, peg, end
 	return session.repository.GetDeletedRev(ctx, session.join(name), peg, end)
 }
 
-func (*Session) GetCommitEditor(context.Context, svn.Props, map[string]string, bool, func(*ra.CommitInfo) error) (delta.Editor, error) {
-	return nil, notImplemented("commit")
+func (session *Session) GetCommitEditor(ctx context.Context, properties svn.Props, lockTokens map[string]string, keepLocks bool, callback func(*ra.CommitInfo) error) (delta.Editor, error) {
+	tokens := make(map[string]string, len(lockTokens))
+	for name, token := range lockTokens {
+		tokens["/"+session.join(name)] = token
+	}
+	return session.repository.GetCommitEditor(ctx, repos.CommitOptions{BasePath: session.base, RepositoryURL: session.rootURL, Properties: properties, LockTokens: tokens, KeepLocks: keepLocks, Callback: callback})
 }
 
-func (*Session) Lock(context.Context, map[string]svn.Revnum, string, bool, ra.LockCallback) error {
-	return notImplemented("lock")
+func (session *Session) Lock(ctx context.Context, pathRevisions map[string]svn.Revnum, comment string, steal bool, callback ra.LockCallback) error {
+	names := make([]string, 0, len(pathRevisions))
+	for name := range pathRevisions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fullPath := session.join(name)
+		root, _, itemErr := session.repository.Root(ctx, svn.InvalidRevnum)
+		if itemErr == nil {
+			var kind svn.NodeKind
+			kind, itemErr = root.CheckPath(ctx, fullPath)
+			if itemErr == nil && kind != svn.NodeFile {
+				itemErr = fmt.Errorf("%w: %s", svn.ErrFSNotFile, name)
+			}
+			if itemErr == nil && pathRevisions[name].IsValid() {
+				var created svn.Revnum
+				created, itemErr = root.NodeCreatedRevision(ctx, fullPath)
+				if itemErr == nil && created > pathRevisions[name] {
+					itemErr = fmt.Errorf("%w: %s", svn.ErrFSOutOfDate, name)
+				}
+			}
+		}
+		var lock *svn.Lock
+		if itemErr == nil {
+			lock, itemErr = session.repository.Lock(ctx, fullPath, newLockToken(), "local", comment, time.Time{}, steal)
+		}
+		if callback != nil {
+			if err := callback(name, lock, itemErr); err != nil {
+				return err
+			}
+		} else if itemErr != nil {
+			return itemErr
+		}
+	}
+	return nil
 }
 
-func (*Session) Unlock(context.Context, map[string]string, bool, ra.LockCallback) error {
-	return notImplemented("unlock")
+func (session *Session) Unlock(ctx context.Context, pathTokens map[string]string, breakLock bool, callback ra.LockCallback) error {
+	names := make([]string, 0, len(pathTokens))
+	for name := range pathTokens {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		itemErr := session.repository.Unlock(ctx, session.join(name), pathTokens[name], breakLock)
+		if callback != nil {
+			if err := callback(name, nil, itemErr); err != nil {
+				return err
+			}
+		} else if itemErr != nil {
+			return itemErr
+		}
+	}
+	return nil
+}
+
+func newLockToken() string {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return fmt.Sprintf("opaquelocktoken:local-%d", time.Now().UnixNano())
+	}
+	value[6] = value[6]&0x0f | 0x40
+	value[8] = value[8]&0x3f | 0x80
+	return fmt.Sprintf("opaquelocktoken:%x-%x-%x-%x-%x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16])
 }
 
 func (session *Session) GetLock(ctx context.Context, name string) (*svn.Lock, error) {
