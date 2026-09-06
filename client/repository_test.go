@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/otuschhoff/go-svn/client"
+	"github.com/otuschhoff/go-svn/props"
 	"github.com/otuschhoff/go-svn/ra"
 	_ "github.com/otuschhoff/go-svn/ra/ralocal"
 	"github.com/otuschhoff/go-svn/repos"
@@ -16,6 +17,47 @@ import (
 	"github.com/otuschhoff/go-svn/svn/notify"
 	"github.com/otuschhoff/go-svn/wc"
 )
+
+func TestCopyURLPinsExternals(t *testing.T) {
+	ctx := context.Background()
+	repository, err := repos.Create(ctx, filepath.Join(t.TempDir(), "repository"), repos.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootURL := "file://" + repository.Path()
+	instance := client.New(nil)
+	revprops := svn.Props{"svn:log": []byte("test")}
+	if _, err := instance.MkdirURL(ctx, rootURL, []string{"trunk/source/nested", "trunk/external"}, true, revprops); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instance.Mucc(ctx, rootURL, []client.Action{{
+		Kind: client.ActionSetProperty, Path: "trunk/source", PropertyName: props.Externals, PropertyValue: []byte("^/trunk/external ext\n"),
+	}, {
+		Kind: client.ActionSetProperty, Path: "trunk/source/nested", PropertyName: props.Externals, PropertyValue: []byte("../../external nested-ext\n"),
+	}}, client.MuccOptions{RevisionProperties: revprops, BaseRevision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := instance.CopyURLWithOptions(ctx, rootURL, rootURL+"/trunk/source", "trunk/copied", 2, svn.NodeDir, client.CopyURLOptions{
+		RevisionProperties: revprops,
+		PinExternals:       true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	properties, err := instance.PropList(ctx, rootURL+"/trunk/copied", client.PropertyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(properties[props.Externals]), "-r2 ^/trunk/external@2 ext\n"; got != want {
+		t.Fatalf("pinned externals = %q, want %q", got, want)
+	}
+	properties, err = instance.PropList(ctx, rootURL+"/trunk/copied/nested", client.PropertyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(properties[props.Externals]), "-r2 ../../external@2 nested-ext\n"; got != want {
+		t.Fatalf("nested pinned externals = %q, want %q", got, want)
+	}
+}
 
 func TestRepositoryReadAndMutationSequence(t *testing.T) {
 	ctx := context.Background()

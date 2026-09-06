@@ -1,6 +1,7 @@
 package wc
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -539,6 +540,15 @@ func (database *Database) ResolveWithChoice(ctx context.Context, targetPath stri
 				selected = info.Conflict.OldPath
 			case ConflictTheirs:
 				selected = info.Conflict.NewPath
+			case ConflictMineConflict, ConflictTheirsConflict:
+				contents, err := os.ReadFile(targetPath)
+				if err != nil {
+					return err
+				}
+				contents = ResolveConflictHunks(contents, choice == ConflictMineConflict)
+				if err := os.WriteFile(targetPath, contents, 0o644); err != nil {
+					return err
+				}
 			default:
 				return fmt.Errorf("%w: unsupported resolution choice", svn.ErrClientConflictOptionNotApplicable)
 			}
@@ -558,6 +568,52 @@ func (database *Database) ResolveWithChoice(ctx context.Context, targetPath stri
 	_, err = database.sql.ExecContext(ctx, `UPDATE ACTUAL_NODE SET conflict_old=NULL, conflict_new=NULL, conflict_working=NULL,
 		prop_reject=NULL, tree_conflict_data=NULL, conflict_data=NULL WHERE wc_id=? AND local_relpath=?`, database.wcID, info.RelativePath)
 	return err
+}
+
+func ResolveConflictHunks(contents []byte, chooseMine bool) []byte {
+	lines := bytes.SplitAfter(contents, []byte("\n"))
+	result := make([]byte, 0, len(contents))
+	for index := 0; index < len(lines); {
+		if !bytes.HasPrefix(lines[index], []byte("<<<<<<<")) {
+			result = append(result, lines[index]...)
+			index++
+			continue
+		}
+		mineStart := index + 1
+		separator, end := -1, -1
+		for index = mineStart; index < len(lines); index++ {
+			if bytes.HasPrefix(lines[index], []byte("|||||||")) {
+				separator = index
+				for index++; index < len(lines) && !bytes.HasPrefix(lines[index], []byte("=======")); index++ {
+				}
+				break
+			}
+			if bytes.HasPrefix(lines[index], []byte("=======")) {
+				separator = index
+				break
+			}
+		}
+		if separator < 0 || index >= len(lines) {
+			return contents
+		}
+		theirsStart := index + 1
+		for index = theirsStart; index < len(lines); index++ {
+			if bytes.HasPrefix(lines[index], []byte(">>>>>>>")) {
+				end = index
+				break
+			}
+		}
+		if end < 0 {
+			return contents
+		}
+		if chooseMine {
+			result = append(result, bytes.Join(lines[mineStart:separator], nil)...)
+		} else {
+			result = append(result, bytes.Join(lines[theirsStart:end], nil)...)
+		}
+		index = end + 1
+	}
+	return result
 }
 
 func (database *Database) resolveTreeWithIncoming(ctx context.Context, info *Info) error {

@@ -347,12 +347,20 @@ func (database *Database) filesystemStatus(ctx context.Context, info *Info) (Sta
 
 func (database *Database) matchesPristine(ctx context.Context, info *Info, special bool) (bool, error) {
 	pristine, err := database.OpenPristine(ctx, *info.Checksum)
-	if err != nil {
+	if err != nil && database.format != 32 {
 		return false, err
 	}
-	defer pristine.Close()
-	expected := sha1.New()
-	if _, err := io.Copy(expected, pristine); err != nil {
+	var expected []byte
+	if pristine != nil {
+		defer pristine.Close()
+		hash := sha1.New()
+		if _, err := io.Copy(hash, pristine); err != nil {
+			return false, err
+		}
+		expected = hash.Sum(nil)
+	} else if info.Checksum.Kind == svn.ChecksumSHA1 {
+		expected = info.Checksum.Digest
+	} else {
 		return false, err
 	}
 	actual := sha1.New()
@@ -372,14 +380,14 @@ func (database *Database) matchesPristine(ctx context.Context, info *Info, speci
 		eolStyle := string(info.WorkingProperties[props.EOLStyle])
 		if keywordSpec == "" && eolStyle == "" {
 			_, err = io.Copy(actual, file)
-			return err == nil && bytes.Equal(expected.Sum(nil), actual.Sum(nil)), err
+			return err == nil && bytes.Equal(expected, actual.Sum(nil)), err
 		}
 		keywords := props.ParseKeywords(keywordSpec, props.KeywordContext{})
 		if err := props.DetranslateFile(file, actual, "LF", keywords, true); err != nil {
 			return false, err
 		}
 	}
-	return bytes.Equal(expected.Sum(nil), actual.Sum(nil)), nil
+	return bytes.Equal(expected, actual.Sum(nil)), nil
 }
 
 func propertyStatus(base, working svn.Props) StatusKind {

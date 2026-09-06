@@ -22,6 +22,7 @@ type CommitOptions struct {
 	Changelists        []string
 	KeepChangelists    bool
 	KeepLocks          bool
+	IncludeExternals   bool
 }
 
 type commitNode struct {

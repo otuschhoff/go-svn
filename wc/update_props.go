@@ -89,43 +89,13 @@ func (database *Database) recordUpdateExternals(ctx context.Context, editor *upd
 		return nil
 	}
 	definitionReposPath := editor.repositoryPath(editorPath)
-	for _, rawLine := range strings.Split(string(value), "\n") {
-		line := strings.TrimSpace(rawLine)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		operativeRevision := ""
-		if len(fields) > 0 && fields[0] == "-r" {
-			if len(fields) < 4 {
-				continue
-			}
-			operativeRevision, fields = fields[1], fields[2:]
-		} else if len(fields) > 0 && strings.HasPrefix(fields[0], "-r") {
-			operativeRevision, fields = strings.TrimPrefix(fields[0], "-r"), fields[1:]
-		}
-		if len(fields) != 2 {
-			continue
-		}
-		remote, local := fields[0], fields[1]
-		if !externalURLLike(remote) {
-			local, remote = remote, local
-		}
-		local = path.Clean(local)
-		if local == "." || path.IsAbs(local) || local == ".." || strings.HasPrefix(local, "../") {
-			continue
-		}
-		pegRevision := ""
-		if base, peg, ok := strings.Cut(remote, "@"); ok && base != "" {
-			if _, err := strconv.ParseInt(peg, 10, 64); err == nil {
-				remote, pegRevision = base, peg
-			}
-		}
-		repositoryPath, ok := sameRepositoryExternalPath(database.repository.Root, definitionReposPath, remote)
-		if !ok {
-			continue
-		}
-		localRelpath := path.Join(definitionPath, local)
+	definitions, err := ParseExternals(string(value))
+	if err != nil {
+		return nil
+	}
+	for _, definition := range definitions {
+		repositoryPath := externalDefinitionLocation(database.repository.Root, definitionReposPath, definition.URL)
+		localRelpath := path.Join(definitionPath, definition.LocalPath)
 		parent := path.Dir(localRelpath)
 		if parent == "." {
 			parent = ""
@@ -137,7 +107,7 @@ func (database *Database) recordUpdateExternals(ctx context.Context, editor *upd
 			presence=excluded.presence, kind=excluded.kind, def_local_relpath=excluded.def_local_relpath,
 			def_repos_relpath=excluded.def_repos_relpath, def_operational_revision=excluded.def_operational_revision,
 			def_revision=excluded.def_revision`, database.wcID, localRelpath, nullableParent(localRelpath, parent), database.repository.ID,
-			definitionPath, repositoryPath, operativeRevision, pegRevision)
+			definitionPath, repositoryPath, externalRevisionValue(definition.OperativeRevision), externalRevisionValue(definition.PegRevision))
 		if err != nil {
 			return err
 		}
@@ -145,20 +115,23 @@ func (database *Database) recordUpdateExternals(ctx context.Context, editor *upd
 	return nil
 }
 
-func externalURLLike(value string) bool {
-	return strings.Contains(value, "://") || strings.HasPrefix(value, "^") || strings.HasPrefix(value, "/") || strings.HasPrefix(value, "../") || strings.HasPrefix(value, "./")
+func externalRevisionValue(revision svn.Revision) any {
+	if revision.Kind != svn.RevisionUnspecified {
+		return revision.String()
+	}
+	return nil
 }
 
-func sameRepositoryExternalPath(repositoryRoot, definitionReposPath, externalURL string) (string, bool) {
+func externalDefinitionLocation(repositoryRoot, definitionReposPath, externalURL string) string {
 	switch {
 	case strings.HasPrefix(externalURL, "^/"):
-		return strings.TrimPrefix(externalURL, "^/"), true
+		return strings.TrimPrefix(externalURL, "^/")
 	case strings.HasPrefix(externalURL, repositoryRoot+"/"):
-		return strings.TrimPrefix(externalURL, repositoryRoot+"/"), true
+		return strings.TrimPrefix(externalURL, repositoryRoot+"/")
 	case strings.Contains(externalURL, "://") || strings.HasPrefix(externalURL, "//") || strings.HasPrefix(externalURL, "/"):
-		return "", false
+		return externalURL
 	default:
-		return path.Clean(path.Join(definitionReposPath, externalURL)), true
+		return path.Clean(path.Join(definitionReposPath, externalURL))
 	}
 }
 

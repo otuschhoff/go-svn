@@ -42,6 +42,8 @@ const (
 	ConflictBase
 	ConflictMine
 	ConflictTheirs
+	ConflictMineConflict
+	ConflictTheirsConflict
 )
 
 type updateEditor struct {
@@ -863,6 +865,10 @@ func (file *updateFile) mergeLocalChanges(ctx context.Context, incomingName stri
 			result.Contents, result.Conflicted = base, false
 		case ConflictTheirs:
 			result.Contents, result.Conflicted = theirs, false
+		case ConflictMineConflict:
+			result.Contents, result.Conflicted = ResolveConflictHunks(result.Contents, true), false
+		case ConflictTheirsConflict:
+			result.Contents, result.Conflicted = ResolveConflictHunks(result.Contents, false), false
 		}
 	}
 	merged, err := os.CreateTemp(filepath.Join(file.editor.database.wcRoot, ".svn", "tmp"), "merge-")

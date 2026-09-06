@@ -25,6 +25,11 @@ func (client *Client) Checkout(ctx context.Context, repositoryURL, destination s
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
+	if !options.IgnoreExternals {
+		if err := client.processExternals(ctx, database, options, make(map[string]bool)); err != nil {
+			return svn.InvalidRevnum, err
+		}
+	}
 	return info.Revision, nil
 }
 
@@ -36,7 +41,15 @@ func (client *Client) Update(ctx context.Context, targetPath string, revision sv
 	}
 	defer database.Close()
 	defer session.Close()
-	return database.Update(ctx, session, targetPath, revision, options)
+	previous, err := database.Externals(ctx)
+	if err != nil {
+		return svn.InvalidRevnum, err
+	}
+	updated, err := database.Update(ctx, session, targetPath, revision, options)
+	if err == nil && !options.IgnoreExternals {
+		err = client.reconcileExternals(ctx, database, previous, options)
+	}
+	return updated, err
 }
 
 func (client *Client) Switch(ctx context.Context, targetPath, switchURL string, revision svn.Revnum, options wc.UpdateOptions) (svn.Revnum, error) {
@@ -47,7 +60,15 @@ func (client *Client) Switch(ctx context.Context, targetPath, switchURL string, 
 	}
 	defer database.Close()
 	defer session.Close()
-	return database.Switch(ctx, session, targetPath, switchURL, revision, options)
+	previous, err := database.Externals(ctx)
+	if err != nil {
+		return svn.InvalidRevnum, err
+	}
+	updated, err := database.Switch(ctx, session, targetPath, switchURL, revision, options)
+	if err == nil && !options.IgnoreExternals {
+		err = client.reconcileExternals(ctx, database, previous, options)
+	}
+	return updated, err
 }
 
 func (client *Client) combineNotify(existing notify.Func) notify.Func {

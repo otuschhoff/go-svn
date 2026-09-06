@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,52 @@ import (
 
 	"github.com/otuschhoff/go-svn/svn"
 )
+
+func TestFormat32StatusWithoutPristineFile(t *testing.T) {
+	database := createTestWorkingCopy(t)
+	root := database.RootPath()
+	file := filepath.Join(root, "file")
+	if err := os.WriteFile(file, []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha1Checksum, md5Checksum, size, err := checksumsForFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.installPristine(context.Background(), file, sha1Checksum, md5Checksum, size); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.sql.Exec(`INSERT INTO NODES (wc_id, local_relpath, op_depth, parent_relpath, repos_id, repos_path, revision, presence, kind, properties, checksum, changed_revision)
+		VALUES (?, 'file', 0, '', ?, 'trunk/file', 1, 'normal', 'file', X'2829', ?, 1)`, database.wcID, database.repository.ID, sha1Checksum.Serialize()); err != nil {
+		t.Fatal(err)
+	}
+	hexValue := sha1Checksum.Hex()
+	if err := os.Remove(filepath.Join(root, ".svn", "pristine", hexValue[:2], hexValue+".svn-base")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.sql.Exec(`DELETE FROM PRISTINE WHERE checksum=?`, sha1Checksum.Serialize()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.sql.Exec(`PRAGMA user_version = 32`); err != nil {
+		t.Fatal(err)
+	}
+	database.Close()
+	database, err = Open(context.Background(), root, Options{AllowFormat32: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := os.WriteFile(file, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var status *Status
+	if err := database.Status(context.Background(), file, StatusOptions{Depth: svn.DepthEmpty, Verbose: true}, func(value *Status) error { status = value; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if status == nil || status.TextStatus != StatusModified {
+		t.Fatalf("format 32 status = %#v", status)
+	}
+}
 
 func TestOpenDatabaseFormat(t *testing.T) {
 	for _, test := range []struct {
@@ -38,6 +85,31 @@ func TestOpenDatabaseFormat(t *testing.T) {
 			}
 			database.Close()
 		}
+	}
+}
+
+func TestOpenDatabaseFormat32IsExplicitlyReadOnly(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "wc.db")
+	handle, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.Exec("PRAGMA user_version = 32"); err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Close(); err != nil {
+		t.Fatal(err)
+	}
+	database, err := OpenDatabase(context.Background(), databasePath, Options{AllowFormat32: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.Close()
+	if database, err := OpenDatabase(context.Background(), databasePath, Options{AllowFormat32: true, Writable: true}); !errors.Is(err, svn.ErrWCUnsupportedFormat) {
+		if database != nil {
+			database.Close()
+		}
+		t.Fatalf("writable format 32 error = %v", err)
 	}
 }
 

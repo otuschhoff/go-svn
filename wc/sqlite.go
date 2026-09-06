@@ -15,6 +15,7 @@ const CurrentFormat = 31
 
 type Options struct {
 	AllowNewerFormat bool
+	AllowFormat32    bool
 	Writable         bool
 }
 
@@ -91,7 +92,11 @@ func (database *Database) initialize(ctx context.Context, options Options) error
 	if database.format < CurrentFormat {
 		return fmt.Errorf("%w: working copy format %d, expected %d", svn.ErrWCUpgradeRequired, database.format, CurrentFormat)
 	}
-	if database.format > CurrentFormat && !options.AllowNewerFormat {
+	if database.format == 32 && options.AllowFormat32 && options.Writable {
+		return fmt.Errorf("%w: working copy format 32 is read-only", svn.ErrWCUnsupportedFormat)
+	}
+	format32Allowed := database.format == 32 && options.AllowFormat32
+	if database.format > CurrentFormat && !format32Allowed && !options.AllowNewerFormat {
 		return fmt.Errorf("%w: working copy format %d, expected %d", svn.ErrWCUnsupportedFormat, database.format, CurrentFormat)
 	}
 	return nil

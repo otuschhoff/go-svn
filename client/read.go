@@ -325,9 +325,18 @@ func (client *Client) MergeinfoRevisions(ctx context.Context, sourceValue, targe
 	}); err != nil {
 		return nil, err
 	}
-	catalog, err := target.session.GetMergeinfo(ctx, []string{target.path}, target.revision, mergeinfo.InheritanceInherited, false)
-	if err != nil {
-		return nil, err
+	var catalog map[string]mergeinfo.Mergeinfo
+	if target.workingInfo != nil {
+		working, err := client.WorkingCopyMergeinfo(ctx, target.workingInfo.Path, mergeinfo.InheritanceInherited)
+		if err != nil {
+			return nil, err
+		}
+		catalog = map[string]mergeinfo.Mergeinfo{target.path: working.Mergeinfo}
+	} else {
+		catalog, err = target.session.GetMergeinfo(ctx, []string{target.path}, target.revision, mergeinfo.InheritanceInherited, false)
+		if err != nil {
+			return nil, err
+		}
 	}
 	sourcePath := "/" + strings.Trim(strings.TrimPrefix(source.url, source.repositoryRoot), "/")
 	merged := make(map[svn.Revnum]bool)

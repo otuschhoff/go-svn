@@ -11,9 +11,11 @@ import (
 	"strings"
 
 	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/props"
 	"github.com/otuschhoff/go-svn/ra"
 	"github.com/otuschhoff/go-svn/svn"
 	"github.com/otuschhoff/go-svn/svn/notify"
+	"github.com/otuschhoff/go-svn/wc"
 )
 
 type ActionKind uint8
@@ -95,6 +97,14 @@ func (client *Client) Mucc(ctx context.Context, repositoryURL string, actions []
 		node.kind, err = session.CheckPath(ctx, name, base)
 		if err != nil {
 			return nil, err
+		}
+		if node.kind == svn.NodeNone {
+			for _, action := range node.actions {
+				if action.Kind == ActionSetProperty && action.NodeKind != svn.NodeNone {
+					node.kind = action.NodeKind
+					break
+				}
+			}
 		}
 	}
 	var committed *ra.CommitInfo
@@ -336,7 +346,82 @@ func (client *Client) DeleteURL(ctx context.Context, repositoryURL string, paths
 }
 
 func (client *Client) CopyURL(ctx context.Context, repositoryURL, source, destination string, revision svn.Revnum, kind svn.NodeKind, revprops svn.Props) (*ra.CommitInfo, error) {
-	return client.Mucc(ctx, repositoryURL, []Action{{Kind: ActionCopy, Path: destination, Source: source, Revision: revision, NodeKind: kind}}, MuccOptions{RevisionProperties: revprops, BaseRevision: revision})
+	return client.CopyURLWithOptions(ctx, repositoryURL, source, destination, revision, kind, CopyURLOptions{RevisionProperties: revprops})
+}
+
+type CopyURLOptions struct {
+	RevisionProperties svn.Props
+	PinExternals       bool
+}
+
+func (client *Client) CopyURLWithOptions(ctx context.Context, repositoryURL, source, destination string, revision svn.Revnum, kind svn.NodeKind, options CopyURLOptions) (*ra.CommitInfo, error) {
+	actions := []Action{{Kind: ActionCopy, Path: destination, Source: source, Revision: revision, NodeKind: kind}}
+	if options.PinExternals && kind == svn.NodeDir {
+		pinned, err := client.pinnedExternalActions(ctx, source, destination, revision)
+		if err != nil {
+			return nil, err
+		}
+		actions = append(actions, pinned...)
+	}
+	return client.Mucc(ctx, repositoryURL, actions, MuccOptions{RevisionProperties: options.RevisionProperties, BaseRevision: revision})
+}
+
+func (client *Client) pinnedExternalActions(ctx context.Context, source, destination string, revision svn.Revnum) ([]Action, error) {
+	nodes, _, err := client.diffSnapshot(ctx, DiffTarget{Target: source, Revision: svn.Revision{Kind: svn.RevisionNumber, Number: revision}}, svn.DepthInfinity)
+	if err != nil {
+		return nil, err
+	}
+	target, err := client.resolveTarget(ctx, source, InfoOptions{Revision: svn.Revision{Kind: svn.RevisionNumber, Number: revision}})
+	if err != nil {
+		return nil, err
+	}
+	defer target.close()
+	var actions []Action
+	for name, node := range nodes {
+		value := node.properties[props.Externals]
+		if node.kind != svn.NodeDir || len(value) == 0 {
+			continue
+		}
+		definitions, err := wc.ParseExternals(string(value))
+		if err != nil {
+			return nil, err
+		}
+		definingURL := target.url
+		if name != "." {
+			definingURL = joinRepositoryURL(definingURL, name)
+		}
+		lines := make([]string, 0, len(definitions))
+		for _, definition := range definitions {
+			externalURL, err := resolveExportExternalURL(target.repositoryRoot, definingURL, definition.URL)
+			if err != nil {
+				return nil, err
+			}
+			operative := definition.OperativeRevision
+			if operative.Kind == svn.RevisionUnspecified {
+				operative = svn.Revision{Kind: svn.RevisionHead}
+			}
+			resolved, err := client.resolveTarget(ctx, externalURL, InfoOptions{Revision: operative, PegRevision: definition.PegRevision})
+			if err != nil {
+				return nil, err
+			}
+			pinnedRevision := resolved.revision
+			resolved.close()
+			lines = append(lines, fmt.Sprintf("-r%d %s@%d %s", pinnedRevision, quoteExternalField(definition.URL), pinnedRevision, quoteExternalField(definition.LocalPath)))
+		}
+		propertyPath := destination
+		if name != "." {
+			propertyPath = path.Join(destination, name)
+		}
+		actions = append(actions, Action{Kind: ActionSetProperty, Path: propertyPath, PropertyName: props.Externals, PropertyValue: []byte(strings.Join(lines, "\n") + "\n"), NodeKind: svn.NodeDir})
+	}
+	return actions, nil
+}
+
+func quoteExternalField(value string) string {
+	if !strings.ContainsAny(value, " \t\r\n\"'") {
+		return value
+	}
+	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
 
 func (client *Client) MoveURL(ctx context.Context, repositoryURL, source, destination string, revision svn.Revnum, kind svn.NodeKind, revprops svn.Props) (*ra.CommitInfo, error) {
