@@ -15,6 +15,7 @@ const CurrentFormat = 31
 
 type Options struct {
 	AllowNewerFormat bool
+	Writable         bool
 }
 
 type statement string
@@ -35,6 +36,7 @@ type Database struct {
 	repository Repository
 	statements map[statement]*sql.Stmt
 	inherited  map[string][]InheritedProperties
+	writable   bool
 	mu         sync.Mutex
 }
 
@@ -46,14 +48,18 @@ func OpenDatabase(ctx context.Context, databasePath string, options Options) (*D
 	if err != nil {
 		return nil, err
 	}
-	dsn := (&url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro"}).String()
+	mode := "ro"
+	if options.Writable {
+		mode = "rw"
+	}
+	dsn := (&url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=" + mode}).String()
 	handle, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open working copy database: %w", err)
 	}
 	handle.SetMaxOpenConns(1)
 	handle.SetMaxIdleConns(1)
-	database := &Database{sql: handle, path: absolute, statements: make(map[statement]*sql.Stmt), inherited: make(map[string][]InheritedProperties)}
+	database := &Database{sql: handle, path: absolute, statements: make(map[statement]*sql.Stmt), inherited: make(map[string][]InheritedProperties), writable: options.Writable}
 	if err := database.initialize(ctx, options); err != nil {
 		handle.Close()
 		return nil, err
@@ -70,7 +76,9 @@ func (database *Database) initialize(ctx context.Context, options Options) error
 		"PRAGMA case_sensitive_like = ON",
 		"PRAGMA temp_store = MEMORY",
 		"PRAGMA busy_timeout = 10000",
-		"PRAGMA query_only = ON",
+	}
+	if !options.Writable {
+		pragmas = append(pragmas, "PRAGMA query_only = ON")
 	}
 	for _, pragma := range pragmas {
 		if _, err := database.sql.ExecContext(ctx, pragma); err != nil {

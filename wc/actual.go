@@ -18,6 +18,8 @@ type Conflict struct {
 	Text         bool
 	Property     bool
 	Tree         bool
+	TreeReason   string
+	TreeAction   string
 }
 
 type actualRow struct {
@@ -76,6 +78,10 @@ func decodeConflictRecords(node *skel.Node, conflict *Conflict) {
 			}
 		case "tree":
 			conflict.Tree = true
+			if len(node.Children) >= 4 {
+				conflict.TreeReason = string(node.Children[2].Atom)
+				conflict.TreeAction = string(node.Children[3].Atom)
+			}
 		}
 	}
 	for _, child := range node.Children {

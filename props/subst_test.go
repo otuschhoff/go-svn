@@ -49,6 +49,17 @@ func TestTranslateRejectsMixedEOLWithoutRepair(t *testing.T) {
 	}
 }
 
+func TestTranslatePreservesEOLWithoutStyle(t *testing.T) {
+	input := "one\r\ntwo\rthree\n"
+	var output bytes.Buffer
+	if err := Translate(strings.NewReader(input), &output, "", nil, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != input {
+		t.Fatalf("output = %q, want %q", output.String(), input)
+	}
+}
+
 func TestParseKeywordsCustomFormats(t *testing.T) {
 	context := KeywordContext{Author: "alice", Basename: "f", Date: time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC), Path: "trunk/f", Revision: 7, RootURL: "https://host/repo", URL: "https://host/repo/trunk/f"}
 	values := ParseKeywords("Rev Id Custom=%a%_%r%_%%", context)

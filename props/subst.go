@@ -117,11 +117,22 @@ func (state *translationState) consume(value byte) error {
 }
 
 func (state *translationState) emitEOL(style byte) error {
-	if state.seenEOL != 0 && state.seenEOL != style && !state.repair {
+	if state.eol != nil && state.seenEOL != 0 && state.seenEOL != style && !state.repair {
 		return fmt.Errorf("%w: mixed line endings", svn.ErrIOInconsistentEol)
 	}
 	state.seenEOL = style
-	for _, value := range state.eol {
+	eol := state.eol
+	if eol == nil {
+		switch style {
+		case 1:
+			eol = []byte{'\r'}
+		case 2:
+			eol = []byte{'\r', '\n'}
+		default:
+			eol = []byte{'\n'}
+		}
+	}
+	for _, value := range eol {
 		if err := state.emitTextByte(value); err != nil {
 			return err
 		}
@@ -200,7 +211,7 @@ func translateKeyword(candidate []byte, values KeywordValues, expand bool) []byt
 func canonicalEOL(style string) ([]byte, error) {
 	switch strings.ToLower(strings.TrimSpace(style)) {
 	case "", "none":
-		return []byte("\n"), nil
+		return nil, nil
 	case "native":
 		if runtime.GOOS == "windows" {
 			return []byte("\r\n"), nil

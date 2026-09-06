@@ -100,10 +100,11 @@ func Canonicalize(name string, value []byte, kind svn.NodeKind) ([]byte, error) 
 		if err != nil {
 			return nil, err
 		}
-		if _, err := mergeinfo.Parse(string(text)); err != nil {
+		parsed, err := mergeinfo.Parse(string(text))
+		if err != nil {
 			return nil, err
 		}
-		return text, nil
+		return []byte(mergeinfo.String(parsed)), nil
 	case Externals:
 		text, err := normalizeText(value, false)
 		if err != nil {

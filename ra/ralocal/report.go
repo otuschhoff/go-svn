@@ -26,6 +26,7 @@ type report struct {
 	textDeltas     bool
 	sendCopyfrom   bool
 	ignoreAncestry bool
+	depth          svn.Depth
 	paths          map[string]reportPath
 	done           bool
 }
@@ -66,7 +67,7 @@ func (session *Session) newReporter(revision svn.Revnum, target, source string, 
 	if editor == nil {
 		return nil, fmt.Errorf("%w: nil editor", svn.ErrIncorrectParams)
 	}
-	return &report{session: session, revision: revision, target: target, source: source, editor: delta.DepthFilter(editor, depth, ""), baseRev: svn.InvalidRevnum, textDeltas: textDeltas, sendCopyfrom: sendCopyfrom, ignoreAncestry: ignoreAncestry, paths: make(map[string]reportPath)}, nil
+	return &report{session: session, revision: revision, target: target, source: source, editor: editor, depth: depth, baseRev: svn.InvalidRevnum, textDeltas: textDeltas, sendCopyfrom: sendCopyfrom, ignoreAncestry: ignoreAncestry, paths: make(map[string]reportPath)}, nil
 }
 
 func (reporter *report) SetPath(_ context.Context, name string, revision svn.Revnum, depth svn.Depth, startEmpty bool, _ string) error {
@@ -103,7 +104,29 @@ func (reporter *report) FinishReport(ctx context.Context) error {
 		return err
 	}
 	lookup := reporter.baseLookup()
-	return driveRoots(ctx, reporter.editor, reporter.session.repository, lookup, reporter.excluded, targetRoot, reporter.source, resolved, reporter.textDeltas, reporter.sendCopyfrom, reporter.ignoreAncestry, svn.InvalidRevnum)
+	editor := delta.DepthFilter(reporter.editor, reporter.depth, "")
+	rootPath := reporter.source
+	kind, err := targetRoot.CheckPath(ctx, reporter.source)
+	if err != nil {
+		return err
+	}
+	if kind == svn.NodeNone && reporter.baseRev.IsValid() {
+		baseRoot, _, rootErr := reporter.session.repository.Root(ctx, reporter.baseRev)
+		if rootErr != nil {
+			return rootErr
+		}
+		kind, err = baseRoot.CheckPath(ctx, reporter.source)
+		if err != nil {
+			return err
+		}
+	}
+	if kind != svn.NodeDir {
+		name := path.Base(reporter.source)
+		rootPath = path.Dir(reporter.source)
+		editor = delta.DepthFilter(reporter.editor, reporter.depth, name)
+		lookup = reporter.fileTargetLookup(ctx, name, rootPath)
+	}
+	return driveRoots(ctx, editor, reporter.session.repository, lookup, reporter.excluded, targetRoot, rootPath, resolved, reporter.textDeltas, reporter.sendCopyfrom, reporter.ignoreAncestry, svn.InvalidRevnum)
 }
 
 func (reporter *report) AbortReport(context.Context) error {
@@ -188,7 +211,36 @@ func (reporter *report) baseLookup() baseLookup {
 			return nil, "", svn.InvalidRevnum, err
 		}
 		remainder := strings.TrimPrefix(strings.TrimPrefix(name, selectedName), "/")
-		return root, path.Join(selected.source, remainder), selected.revision, nil
+		basePath := path.Join(selected.source, remainder)
+		if remainder != "" {
+			level := strings.Count(remainder, "/") + 1
+			included := selected.depth == svn.DepthInfinity || selected.depth == svn.DepthUnknown || selected.depth == svn.DepthImmediates && level == 1
+			if selected.depth == svn.DepthFiles && level == 1 {
+				kind, err := root.CheckPath(ctx, basePath)
+				if err != nil {
+					return nil, "", svn.InvalidRevnum, err
+				}
+				included = kind == svn.NodeFile
+			}
+			if !included {
+				return nil, "", svn.InvalidRevnum, nil
+			}
+		}
+		return root, basePath, selected.revision, nil
+	}
+}
+
+func (reporter *report) fileTargetLookup(ctx context.Context, targetName, parentPath string) baseLookup {
+	targetLookup := reporter.baseLookup()
+	baseRoot, _, baseErr := reporter.session.repository.Root(ctx, reporter.baseRev)
+	return func(ctx context.Context, editorPath string) (fs.Root, string, svn.Revnum, error) {
+		if editorPath == targetName {
+			return targetLookup(ctx, "")
+		}
+		if baseErr != nil {
+			return nil, "", svn.InvalidRevnum, baseErr
+		}
+		return baseRoot, path.Join(parentPath, editorPath), reporter.baseRev, nil
 	}
 }
 

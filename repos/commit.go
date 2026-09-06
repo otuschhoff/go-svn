@@ -26,9 +26,11 @@ type commitEditor struct {
 	repository  *Repository
 	transaction fs.Txn
 	root        fs.TxnRoot
+	baseRoot    fs.Root
 	options     CommitOptions
 	base        svn.Revnum
 	done        bool
+	added       map[string]bool
 }
 
 type commitDir struct {
@@ -61,12 +63,17 @@ func (repository *Repository) GetCommitEditor(ctx context.Context, options Commi
 		_ = transaction.Abort(ctx)
 		return nil, err
 	}
+	baseRoot, _, err := repository.Root(ctx, base)
+	if err != nil {
+		_ = transaction.Abort(ctx)
+		return nil, err
+	}
 	author := string(options.Properties["svn:author"])
 	if _, err := repository.RunHook(ctx, "start-commit", []string{repository.path, author, "", transaction.Name()}, nil); err != nil {
 		_ = transaction.Abort(ctx)
 		return nil, err
 	}
-	return &commitEditor{repository: repository, transaction: transaction, root: root, options: options, base: base}, nil
+	return &commitEditor{repository: repository, transaction: transaction, root: root, baseRoot: baseRoot, options: options, base: base, added: make(map[string]bool)}, nil
 }
 
 func (*commitEditor) SetTargetRevision(context.Context, svn.Revnum) error { return nil }
@@ -123,8 +130,12 @@ func (editor *commitEditor) AbortEdit(ctx context.Context) error {
 	return editor.transaction.Abort(ctx)
 }
 
-func (directory *commitDir) DeleteEntry(ctx context.Context, name string, _ svn.Revnum) error {
-	return directory.editor.root.Delete(ctx, directory.editor.fullPath(name))
+func (directory *commitDir) DeleteEntry(ctx context.Context, name string, revision svn.Revnum) error {
+	nodePath := directory.editor.fullPath(name)
+	if err := directory.editor.checkOutOfDate(ctx, nodePath, revision); err != nil {
+		return err
+	}
+	return directory.editor.root.Delete(ctx, nodePath)
 }
 
 func (directory *commitDir) AddDirectory(ctx context.Context, name string, source *delta.CopySource) (delta.DirEditor, error) {
@@ -142,11 +153,15 @@ func (directory *commitDir) AddDirectory(ctx context.Context, name string, sourc
 	if err != nil {
 		return nil, err
 	}
+	directory.editor.added[nodePath] = true
 	return &commitDir{editor: directory.editor, nodePath: nodePath}, nil
 }
 
-func (directory *commitDir) OpenDirectory(ctx context.Context, name string, _ svn.Revnum) (delta.DirEditor, error) {
+func (directory *commitDir) OpenDirectory(ctx context.Context, name string, revision svn.Revnum) (delta.DirEditor, error) {
 	nodePath := directory.editor.fullPath(name)
+	if err := directory.editor.checkOutOfDate(ctx, nodePath, revision); err != nil {
+		return nil, err
+	}
 	kind, err := directory.editor.root.CheckPath(ctx, nodePath)
 	if err != nil {
 		return nil, err
@@ -178,11 +193,15 @@ func (directory *commitDir) AddFile(ctx context.Context, name string, source *de
 	if err != nil {
 		return nil, err
 	}
+	directory.editor.added[nodePath] = true
 	return &commitFile{editor: directory.editor, nodePath: nodePath}, nil
 }
 
-func (directory *commitDir) OpenFile(ctx context.Context, name string, _ svn.Revnum) (delta.FileEditor, error) {
+func (directory *commitDir) OpenFile(ctx context.Context, name string, revision svn.Revnum) (delta.FileEditor, error) {
 	nodePath := directory.editor.fullPath(name)
+	if err := directory.editor.checkOutOfDate(ctx, nodePath, revision); err != nil {
+		return nil, err
+	}
 	kind, err := directory.editor.root.CheckPath(ctx, nodePath)
 	if err != nil {
 		return nil, err
@@ -220,6 +239,32 @@ func (file *commitFile) Close(ctx context.Context, checksum *svn.Checksum) error
 
 func (editor *commitEditor) fullPath(name string) string {
 	return cleanCommitPath(path.Join(editor.options.BasePath, name))
+}
+
+func (editor *commitEditor) checkOutOfDate(ctx context.Context, nodePath string, revision svn.Revnum) error {
+	if !revision.IsValid() {
+		return nil
+	}
+	for addedPath := range editor.added {
+		if nodePath == addedPath || strings.HasPrefix(nodePath, strings.TrimSuffix(addedPath, "/")+"/") {
+			return nil
+		}
+	}
+	kind, err := editor.baseRoot.CheckPath(ctx, nodePath)
+	if err != nil {
+		return err
+	}
+	if kind == svn.NodeNone {
+		return fmt.Errorf("%w: %s", svn.ErrFSOutOfDate, nodePath)
+	}
+	createdRevision, err := editor.baseRoot.NodeCreatedRevision(ctx, nodePath)
+	if err != nil {
+		return err
+	}
+	if createdRevision > revision {
+		return fmt.Errorf("%w: %s", svn.ErrFSOutOfDate, nodePath)
+	}
+	return nil
 }
 
 func (editor *commitEditor) copySourcePath(value string) (string, error) {
