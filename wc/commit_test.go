@@ -155,6 +155,281 @@ func TestCommitInMemoryRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCommitDepthMatrixInMemory(t *testing.T) {
+	repository := inmem.NewRepository("memory://wc-commit-depths", "wc-commit-depths-uuid")
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
+		"trunk": inmem.Directory(map[string]*inmem.Node{
+			"root-file": inmem.File([]byte("root base\n")),
+			"selected":  inmem.File([]byte("selected base\n")),
+			"excluded":  inmem.File([]byte("excluded base\n")),
+			"dir":       inmem.Directory(map[string]*inmem.Node{"child": inmem.File([]byte("child base\n"))}),
+		}),
+	})})
+	session, err := repository.Open("memory://wc-commit-depths/trunk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	runCommitDepthMatrix(t, session, 1)
+}
+
+func TestCommitDepthMatrixLocal(t *testing.T) {
+	svnadmin := requireTool(t, "svnadmin")
+	svnTool := requireTool(t, "svn")
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v\n%s", err, output)
+	}
+	seed := filepath.Join(root, "seed")
+	if err := os.MkdirAll(filepath.Join(seed, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "root-file"), []byte("root base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "dir", "child"), []byte("child base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{"selected": "selected base\n", "excluded": "excluded base\n"} {
+		if err := os.WriteFile(filepath.Join(seed, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
+		t.Fatalf("svn import: %v\n%s", err, output)
+	}
+	session, _, err := ra.Open(context.Background(), repositoryURL+"/trunk", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	runCommitDepthMatrix(t, session, 1)
+}
+
+func runCommitDepthMatrix(t *testing.T, session ra.Session, revision svn.Revnum) {
+	t.Helper()
+	ctx := context.Background()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Checkout(ctx, session, working, revision, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	rootFile := filepath.Join(working, "root-file")
+	child := filepath.Join(working, "dir", "child")
+	if err := os.WriteFile(rootFile, []byte("root changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte("child changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetProperty(ctx, working, "matrix:root", []byte("set"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetProperty(ctx, filepath.Join(working, "dir"), "matrix:dir", []byte("set"), false); err != nil {
+		t.Fatal(err)
+	}
+	commitTarget := func(t *testing.T, target string, options CommitOptions) {
+		info, err := database.Commit(ctx, session, target, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision++
+		if info.Revision != revision {
+			t.Fatalf("commit revision = %d, want %d", info.Revision, revision)
+		}
+	}
+	commit := func(t *testing.T, depth svn.Depth) {
+		commitTarget(t, working, CommitOptions{
+			RevisionProperties: svn.Props{"svn:log": []byte("depth " + depth.String())}, Depth: depth,
+		})
+	}
+	t.Run("empty-root-properties", func(t *testing.T) {
+		commit(t, svn.DepthEmpty)
+		_, _, properties, err := session.GetDir(ctx, "", revision, 0)
+		if err != nil || string(properties["matrix:root"]) != "set" {
+			t.Fatalf("root properties = %#v, error = %v", properties, err)
+		}
+		assertRepositoryFile(t, ctx, session, "root-file", revision, "root base\n")
+		assertRepositoryFile(t, ctx, session, "dir/child", revision, "child base\n")
+	})
+	t.Run("files-direct-file", func(t *testing.T) {
+		commit(t, svn.DepthFiles)
+		assertRepositoryFile(t, ctx, session, "root-file", revision, "root changed\n")
+		assertRepositoryFile(t, ctx, session, "dir/child", revision, "child base\n")
+	})
+	t.Run("immediates-directory-properties", func(t *testing.T) {
+		commit(t, svn.DepthImmediates)
+		_, _, properties, err := session.GetDir(ctx, "dir", revision, 0)
+		if err != nil || string(properties["matrix:dir"]) != "set" {
+			t.Fatalf("directory properties = %#v, error = %v", properties, err)
+		}
+		assertRepositoryFile(t, ctx, session, "dir/child", revision, "child base\n")
+	})
+	t.Run("infinity-nested-file", func(t *testing.T) {
+		commit(t, svn.DepthInfinity)
+		assertRepositoryFile(t, ctx, session, "dir/child", revision, "child changed\n")
+		if err := database.Status(ctx, working, StatusOptions{Depth: svn.DepthInfinity}, func(status *Status) error {
+			if status.NodeStatus != StatusNormal || status.PropertyStatus != StatusNormal {
+				t.Fatalf("post-commit status = %#v", status)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	selected := filepath.Join(working, "selected")
+	excluded := filepath.Join(working, "excluded")
+	if err := os.WriteFile(selected, []byte("selected one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(excluded, []byte("excluded one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetChangelist(ctx, selected, "commit-now"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetChangelist(ctx, excluded, "commit-later"); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("changelist-filter-keep", func(t *testing.T) {
+		commitTarget(t, working, CommitOptions{
+			RevisionProperties: svn.Props{"svn:log": []byte("selected changelist")}, Depth: svn.DepthInfinity,
+			Changelists: []string{"commit-now"}, KeepChangelists: true,
+		})
+		assertRepositoryFile(t, ctx, session, "selected", revision, "selected one\n")
+		assertRepositoryFile(t, ctx, session, "excluded", revision, "excluded base\n")
+		info, err := database.Info(ctx, selected)
+		if err != nil || info.Changelist != "commit-now" {
+			t.Fatalf("selected info = %#v, error = %v", info, err)
+		}
+	})
+	t.Run("single-file-target-clear-changelist", func(t *testing.T) {
+		if err := os.WriteFile(selected, []byte("selected two\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, selected, CommitOptions{
+			RevisionProperties: svn.Props{"svn:log": []byte("single target")}, Depth: svn.DepthEmpty,
+		})
+		assertRepositoryFile(t, ctx, session, "selected", revision, "selected two\n")
+		info, err := database.Info(ctx, selected)
+		if err != nil || info.Changelist != "" {
+			t.Fatalf("selected info = %#v, error = %v", info, err)
+		}
+	})
+	t.Run("deferred-changelist", func(t *testing.T) {
+		commitTarget(t, working, CommitOptions{
+			RevisionProperties: svn.Props{"svn:log": []byte("deferred changelist")}, Depth: svn.DepthInfinity,
+			Changelists: []string{"commit-later"},
+		})
+		assertRepositoryFile(t, ctx, session, "excluded", revision, "excluded one\n")
+		info, err := database.Info(ctx, excluded)
+		if err != nil || info.Changelist != "" {
+			t.Fatalf("excluded info = %#v, error = %v", info, err)
+		}
+	})
+	t.Run("add-file", func(t *testing.T) {
+		added := filepath.Join(working, "added")
+		if err := os.WriteFile(added, []byte("added\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := database.Add(ctx, added, AddOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, added, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("add file")}, Depth: svn.DepthEmpty})
+		assertRepositoryFile(t, ctx, session, "added", revision, "added\n")
+	})
+	t.Run("add-directory", func(t *testing.T) {
+		addedDirectory := filepath.Join(working, "added-directory")
+		if err := database.Mkdir(ctx, addedDirectory, false); err != nil {
+			t.Fatal(err)
+		}
+		addedChild := filepath.Join(addedDirectory, "child")
+		if err := os.WriteFile(addedChild, []byte("added child\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := database.Add(ctx, addedChild, AddOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, addedDirectory, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("add directory")}, Depth: svn.DepthInfinity})
+		assertRepositoryFile(t, ctx, session, "added-directory/child", revision, "added child\n")
+	})
+	t.Run("delete-file", func(t *testing.T) {
+		if err := database.Delete(ctx, excluded, DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, excluded, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("delete file")}, Depth: svn.DepthEmpty})
+		if kind, err := session.CheckPath(ctx, "excluded", revision); err != nil || kind != svn.NodeNone {
+			t.Fatalf("deleted kind = %v, error = %v", kind, err)
+		}
+	})
+	copied := filepath.Join(working, "copied")
+	t.Run("copy-file", func(t *testing.T) {
+		if err := database.Copy(ctx, rootFile, copied); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, copied, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("copy file")}, Depth: svn.DepthEmpty})
+		assertRepositoryFile(t, ctx, session, "copied", revision, "root changed\n")
+	})
+	t.Run("move-directory", func(t *testing.T) {
+		moved := filepath.Join(working, "moved")
+		if err := database.Move(ctx, filepath.Join(working, "dir"), moved, false); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, working, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("move directory")}, Depth: svn.DepthInfinity})
+		assertRepositoryFile(t, ctx, session, "moved/child", revision, "child changed\n")
+		if kind, err := session.CheckPath(ctx, "dir", revision); err != nil || kind != svn.NodeNone {
+			t.Fatalf("moved source kind = %v, error = %v", kind, err)
+		}
+	})
+	t.Run("replace-file", func(t *testing.T) {
+		if err := database.Delete(ctx, copied, DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(copied, []byte("replacement\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := database.Add(ctx, copied, AddOptions{Force: true}); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, copied, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("replace file")}, Depth: svn.DepthEmpty})
+		assertRepositoryFile(t, ctx, session, "copied", revision, "replacement\n")
+	})
+	t.Run("set-file-property", func(t *testing.T) {
+		if err := database.SetProperty(ctx, rootFile, "matrix:file", []byte("set"), false); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, rootFile, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("set property")}, Depth: svn.DepthEmpty})
+		_, properties, err := session.GetFile(ctx, "root-file", revision, nil, true)
+		if err != nil || string(properties["matrix:file"]) != "set" {
+			t.Fatalf("file properties = %#v, error = %v", properties, err)
+		}
+	})
+	t.Run("delete-file-property", func(t *testing.T) {
+		if err := database.SetProperty(ctx, rootFile, "matrix:file", nil, false); err != nil {
+			t.Fatal(err)
+		}
+		commitTarget(t, rootFile, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("delete property")}, Depth: svn.DepthEmpty})
+		_, properties, err := session.GetFile(ctx, "root-file", revision, nil, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := properties["matrix:file"]; exists {
+			t.Fatalf("deleted property remains: %#v", properties)
+		}
+	})
+}
+
+func assertRepositoryFile(t *testing.T, ctx context.Context, session ra.Session, name string, revision svn.Revnum, want string) {
+	t.Helper()
+	var contents bytes.Buffer
+	if _, _, err := session.GetFile(ctx, name, revision, &contents, false); err != nil || contents.String() != want {
+		t.Fatalf("repository %s = %q, error = %v, want %q", name, contents.String(), err, want)
+	}
+}
+
 func TestCommitWorkingCopyRoundTrip(t *testing.T) {
 	svnadmin := requireTool(t, "svnadmin")
 	svnTool := requireTool(t, "svn")

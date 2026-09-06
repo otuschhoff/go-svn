@@ -120,11 +120,25 @@ func (reporter *report) FinishReport(ctx context.Context) error {
 			return err
 		}
 	}
-	if kind != svn.NodeDir {
-		name := path.Base(reporter.source)
+	rootReport, hasRootReport := reporter.paths[""]
+	missingTarget := hasRootReport && rootReport.deleted && reporter.target != "" && kind != svn.NodeNone
+	if kind != svn.NodeDir || missingTarget {
+		name := path.Base(reporter.target)
+		if reporter.target == "" {
+			name = path.Base(reporter.source)
+		}
 		rootPath = path.Dir(reporter.source)
 		editor = delta.DepthFilter(reporter.editor, reporter.depth, name)
-		lookup = reporter.fileTargetLookup(ctx, name, rootPath)
+		if missingTarget {
+			lookup = func(_ context.Context, editorPath string) (fs.Root, string, svn.Revnum, error) {
+				if editorPath == name || strings.HasPrefix(editorPath, name+"/") {
+					return nil, "", svn.InvalidRevnum, nil
+				}
+				return targetRoot, path.Join(rootPath, editorPath), reporter.revision, nil
+			}
+		} else {
+			lookup = reporter.fileTargetLookup(ctx, name, rootPath)
+		}
 	}
 	return driveRoots(ctx, editor, reporter.session.repository, lookup, reporter.excluded, targetRoot, rootPath, resolved, reporter.textDeltas, reporter.sendCopyfrom, reporter.ignoreAncestry, svn.InvalidRevnum)
 }

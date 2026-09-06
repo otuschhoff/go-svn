@@ -74,8 +74,7 @@ func TestInMemorySparseCheckoutAndUpdate(t *testing.T) {
 	}
 }
 
-func TestInMemoryCheckoutDepthMatrix(t *testing.T) {
-	ctx := context.Background()
+func TestInMemoryCheckoutAndSetDepthMatrices(t *testing.T) {
 	repository := inmem.NewRepository("memory://wc-depths", "wc-depths-uuid")
 	repository.AddRevision(inmem.Revision{
 		Root: inmem.Directory(map[string]*inmem.Node{
@@ -85,6 +84,20 @@ func TestInMemoryCheckoutDepthMatrix(t *testing.T) {
 			}),
 		}),
 	})
+	open := func(t *testing.T) ra.Session {
+		session, err := repository.Open("memory://wc-depths/trunk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	t.Run("checkout", func(t *testing.T) { runCheckoutDepthMatrix(t, open) })
+	t.Run("set-depth", func(t *testing.T) { runSetDepthMatrix(t, open) })
+}
+
+func runCheckoutDepthMatrix(t *testing.T, open func(*testing.T) ra.Session) {
+	t.Helper()
+	ctx := context.Background()
 	tests := []struct {
 		name               string
 		depth              svn.Depth
@@ -97,10 +110,7 @@ func TestInMemoryCheckoutDepthMatrix(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			session, err := repository.Open("memory://wc-depths/trunk")
-			if err != nil {
-				t.Fatal(err)
-			}
+			session := open(t)
 			defer session.Close()
 			working := filepath.Join(t.TempDir(), "working")
 			database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: test.depth})
@@ -126,8 +136,53 @@ func TestInMemoryCheckoutDepthMatrix(t *testing.T) {
 	}
 }
 
-func TestInMemoryUpdateDepthMatrix(t *testing.T) {
+func runSetDepthMatrix(t *testing.T, open func(*testing.T) ra.Session) {
+	t.Helper()
 	ctx := context.Background()
+	depths := []struct {
+		name               string
+		depth              svn.Depth
+		rootFile, dir, kid bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, rootFile: true},
+		{name: "immediates", depth: svn.DepthImmediates, rootFile: true, dir: true},
+		{name: "infinity", depth: svn.DepthInfinity, rootFile: true, dir: true, kid: true},
+	}
+	for _, from := range depths {
+		for _, to := range depths {
+			t.Run(from.name+"-to-"+to.name, func(t *testing.T) {
+				session := open(t)
+				defer session.Close()
+				working := filepath.Join(t.TempDir(), "working")
+				database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: from.depth})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer database.Close()
+				if _, err := database.Update(ctx, session, working, 1, UpdateOptions{Depth: to.depth, SetDepth: &to.depth}); err != nil {
+					t.Fatal(err)
+				}
+				for name, want := range map[string]bool{
+					"root-file": to.rootFile,
+					"dir":       to.dir,
+					"dir/child": to.kid,
+				} {
+					_, err := os.Lstat(filepath.Join(working, filepath.FromSlash(name)))
+					if exists := err == nil; exists != want || err != nil && !os.IsNotExist(err) {
+						t.Fatalf("%s exists = %t, error = %v, want %t", name, exists, err, want)
+					}
+				}
+				info, err := database.Info(ctx, working)
+				if err != nil || info.Depth != to.depth {
+					t.Fatalf("root info = %#v, error = %v", info, err)
+				}
+			})
+		}
+	}
+}
+
+func TestInMemoryUpdateDepthMatrix(t *testing.T) {
 	repository := inmem.NewRepository("memory://wc-update-depths", "wc-update-depths-uuid")
 	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
 		"trunk": inmem.Directory(map[string]*inmem.Node{
@@ -149,6 +204,80 @@ func TestInMemoryUpdateDepthMatrix(t *testing.T) {
 			}),
 		}),
 	})})
+	runUpdateDepthMatrix(t, func(t *testing.T) ra.Session {
+		session, err := repository.Open("memory://wc-update-depths/trunk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	})
+}
+
+func TestLocalDepthMatrices(t *testing.T) {
+	svnadmin := requireTool(t, "svnadmin")
+	svnTool := requireTool(t, "svn")
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v\n%s", err, output)
+	}
+	seed := filepath.Join(root, "seed")
+	if err := os.MkdirAll(filepath.Join(seed, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"root-file":         "root one\n",
+		"root-deleted":      "delete root\n",
+		"dir/child":         "child one\n",
+		"dir/child-deleted": "delete child\n",
+	} {
+		if err := os.WriteFile(filepath.Join(seed, filepath.FromSlash(name)), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
+		t.Fatalf("svn import: %v\n%s", err, output)
+	}
+	author := filepath.Join(root, "author")
+	if output, err := exec.Command(svnTool, "checkout", "-q", repositoryURL+"/trunk", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn checkout: %v\n%s", err, output)
+	}
+	for name, contents := range map[string]string{
+		"root-file":       "root two\n",
+		"root-added":      "add root\n",
+		"dir/child":       "child two\n",
+		"dir/child-added": "add child\n",
+	} {
+		filename := filepath.Join(author, filepath.FromSlash(name))
+		if err := os.WriteFile(filename, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := exec.Command(svnTool, "add", "-q", filepath.Join(author, "root-added"), filepath.Join(author, "dir", "child-added")).CombinedOutput(); err != nil {
+		t.Fatalf("svn add: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(svnTool, "delete", "-q", filepath.Join(author, "root-deleted"), filepath.Join(author, "dir", "child-deleted")).CombinedOutput(); err != nil {
+		t.Fatalf("svn delete: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(svnTool, "commit", "-q", "-m", "update", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn commit: %v\n%s", err, output)
+	}
+	open := func(t *testing.T) ra.Session {
+		session, _, err := ra.Open(context.Background(), repositoryURL+"/trunk", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	t.Run("checkout", func(t *testing.T) { runCheckoutDepthMatrix(t, open) })
+	t.Run("set-depth", func(t *testing.T) { runSetDepthMatrix(t, open) })
+	t.Run("update", func(t *testing.T) { runUpdateDepthMatrix(t, open) })
+}
+
+func runUpdateDepthMatrix(t *testing.T, open func(*testing.T) ra.Session) {
+	t.Helper()
+	ctx := context.Background()
 	tests := []struct {
 		name                       string
 		depth                      svn.Depth
@@ -161,10 +290,7 @@ func TestInMemoryUpdateDepthMatrix(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			session, err := repository.Open("memory://wc-update-depths/trunk")
-			if err != nil {
-				t.Fatal(err)
-			}
+			session := open(t)
 			defer session.Close()
 			working := filepath.Join(t.TempDir(), "working")
 			database, err := Checkout(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthInfinity})
@@ -894,87 +1020,6 @@ func TestUpdateIncomingDeletePreservesLocalEdit(t *testing.T) {
 		if _, err := os.Stat(conflictedPath); !os.IsNotExist(err) {
 			t.Fatalf("incoming-deleted path remains %s: %v", conflictedPath, err)
 		}
-	}
-}
-
-func TestCheckoutAndSetDepth(t *testing.T) {
-	svnadmin := requireTool(t, "svnadmin")
-	svnTool := requireTool(t, "svn")
-	root := t.TempDir()
-	repository := filepath.Join(root, "repository")
-	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
-		t.Fatalf("svnadmin create: %v\n%s", err, output)
-	}
-	seed := filepath.Join(root, "seed")
-	if err := os.MkdirAll(filepath.Join(seed, "directory"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for name := range map[string]bool{"root-file": true, "directory/child": true} {
-		if err := os.WriteFile(filepath.Join(seed, filepath.FromSlash(name)), []byte(name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
-	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
-		t.Fatalf("svn import: %v\n%s", err, output)
-	}
-	for _, test := range []struct {
-		name      string
-		depth     svn.Depth
-		rootFile  bool
-		directory bool
-		child     bool
-	}{
-		{name: "empty", depth: svn.DepthEmpty},
-		{name: "files", depth: svn.DepthFiles, rootFile: true},
-		{name: "immediates", depth: svn.DepthImmediates, rootFile: true, directory: true},
-		{name: "infinity", depth: svn.DepthInfinity, rootFile: true, directory: true, child: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			session, _, err := ra.Open(context.Background(), repositoryURL+"/trunk", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer session.Close()
-			working := filepath.Join(root, "wc-"+test.name)
-			database, err := Checkout(context.Background(), session, working, svn.InvalidRevnum, UpdateOptions{Depth: test.depth})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer database.Close()
-			for name, want := range map[string]bool{"root-file": test.rootFile, "directory": test.directory, "directory/child": test.child} {
-				_, err := os.Stat(filepath.Join(working, filepath.FromSlash(name)))
-				if (err == nil) != want {
-					t.Errorf("%s exists = %v, want %v", name, err == nil, want)
-				}
-			}
-			if test.depth == svn.DepthEmpty {
-				depth := svn.DepthInfinity
-				if _, err := database.Update(context.Background(), session, working, svn.InvalidRevnum, UpdateOptions{Depth: depth, SetDepth: &depth}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := os.Stat(filepath.Join(working, "directory", "child")); err != nil {
-					t.Fatalf("deepened child: %v", err)
-				}
-				filesDepth := svn.DepthFiles
-				if _, err := database.Update(context.Background(), session, working, svn.InvalidRevnum, UpdateOptions{Depth: filesDepth, SetDepth: &filesDepth}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := os.Stat(filepath.Join(working, "directory")); !os.IsNotExist(err) {
-					t.Fatalf("files-depth directory remains: %v", err)
-				}
-				if _, err := os.Stat(filepath.Join(working, "root-file")); err != nil {
-					t.Fatalf("files-depth root file: %v", err)
-				}
-				emptyDepth := svn.DepthEmpty
-				if _, err := database.Update(context.Background(), session, working, svn.InvalidRevnum, UpdateOptions{Depth: emptyDepth, SetDepth: &emptyDepth}); err != nil {
-					t.Fatal(err)
-				}
-				if _, err := os.Stat(filepath.Join(working, "root-file")); !os.IsNotExist(err) {
-					t.Fatalf("empty-depth root file remains: %v", err)
-				}
-			}
-		})
 	}
 }
 

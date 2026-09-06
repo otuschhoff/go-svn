@@ -584,6 +584,7 @@ type report struct {
 type reportEntry struct {
 	revision       svn.Revnum
 	source         string
+	depth          svn.Depth
 	empty, deleted bool
 }
 
@@ -593,16 +594,16 @@ func (session *Session) newReporter(revision svn.Revnum, target, source string, 
 	}
 	return &report{session: session, revision: revision, target: target, source: source, editor: editor, depth: depth, explicitSource: explicitSource, entries: make(map[string]reportEntry)}, nil
 }
-func (report *report) SetPath(_ context.Context, name string, revision svn.Revnum, _ svn.Depth, startEmpty bool, _ string) error {
-	report.entries[clean(name)] = reportEntry{revision: revision, source: join(join(report.session.base, report.target), name), empty: startEmpty}
+func (report *report) SetPath(_ context.Context, name string, revision svn.Revnum, depth svn.Depth, startEmpty bool, _ string) error {
+	report.entries[clean(name)] = reportEntry{revision: revision, source: join(join(report.session.base, report.target), name), depth: depth, empty: startEmpty}
 	return nil
 }
-func (report *report) LinkPath(_ context.Context, name, rawURL string, revision svn.Revnum, _ svn.Depth, startEmpty bool, _ string) error {
+func (report *report) LinkPath(_ context.Context, name, rawURL string, revision svn.Revnum, depth svn.Depth, startEmpty bool, _ string) error {
 	source, ok := relativeURL(report.session.repository.rootURL, rawURL)
 	if !ok {
 		return fmt.Errorf("%w: %q", svn.ErrRAIllegalURL, rawURL)
 	}
-	report.entries[clean(name)] = reportEntry{revision: revision, source: source, empty: startEmpty}
+	report.entries[clean(name)] = reportEntry{revision: revision, source: source, depth: depth, empty: startEmpty}
 	return nil
 }
 func (report *report) DeletePath(_ context.Context, name string) error {
@@ -625,13 +626,15 @@ func (report *report) FinishReport(ctx context.Context) error {
 	target := findNode(value.Root, incomingSource)
 	var base *Node
 	if root, ok := report.entries[""]; ok && !root.deleted && !root.empty {
-		value, revisionErr := report.session.revision(root.revision)
-		if revisionErr != nil {
-			return revisionErr
-		}
-		base = cloneNode(findNode(value.Root, root.source))
-		if base == nil {
-			base = Directory()
+		if root.depth != svn.DepthExclude {
+			value, revisionErr := report.session.revision(root.revision)
+			if revisionErr != nil {
+				return revisionErr
+			}
+			base = limitNodeDepth(cloneNode(findNode(value.Root, root.source)), root.depth)
+			if base == nil {
+				base = Directory()
+			}
 		}
 	}
 	names := make([]string, 0, len(report.entries))
@@ -654,7 +657,7 @@ func (report *report) FinishReport(ctx context.Context) error {
 		if revisionErr != nil {
 			return revisionErr
 		}
-		node := cloneNode(findNode(value.Root, entry.source))
+		node := limitNodeDepth(cloneNode(findNode(value.Root, entry.source)), entry.depth)
 		if node == nil {
 			removeNode(base, name)
 			continue
@@ -669,7 +672,8 @@ func (report *report) FinishReport(ctx context.Context) error {
 		setNode(base, name, node)
 	}
 	editor := delta.DepthFilter(report.editor, report.depth, "")
-	if target != nil && target.Kind != svn.NodeDir || base != nil && base.Kind != svn.NodeDir {
+	missingTarget := base == nil && target != nil && report.target != ""
+	if target != nil && target.Kind != svn.NodeDir || base != nil && base.Kind != svn.NodeDir || missingTarget {
 		name := path.Base(report.target)
 		if report.target == "" {
 			name = path.Base(report.source)
@@ -688,6 +692,31 @@ func (report *report) FinishReport(ctx context.Context) error {
 	}
 	return driveDiff(ctx, editor, base, target, report.revision)
 }
+
+func limitNodeDepth(node *Node, depth svn.Depth) *Node {
+	if node == nil || node.Kind != svn.NodeDir || depth == svn.DepthInfinity || depth == svn.DepthUnknown {
+		return node
+	}
+	if depth == svn.DepthExclude {
+		return nil
+	}
+	for name, child := range node.Children {
+		switch depth {
+		case svn.DepthEmpty:
+			delete(node.Children, name)
+		case svn.DepthFiles:
+			if child.Kind == svn.NodeDir {
+				delete(node.Children, name)
+			}
+		case svn.DepthImmediates:
+			if child.Kind == svn.NodeDir {
+				child.Children = make(map[string]*Node)
+			}
+		}
+	}
+	return node
+}
+
 func (report *report) AbortReport(context.Context) error {
 	if report.done {
 		return nil

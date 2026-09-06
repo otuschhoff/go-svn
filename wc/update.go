@@ -59,14 +59,16 @@ func (database *Database) Update(ctx context.Context, session ra.Session, target
 	editorAnchor := targetPath
 	info, infoErr := database.Info(ctx, targetPath)
 	isFile := infoErr == nil && info.Kind != svn.NodeDir
+	missingTarget := false
 	if infoErr != nil {
 		kind, checkErr := session.CheckPath(ctx, target, revision)
 		if checkErr != nil {
 			return svn.InvalidRevnum, checkErr
 		}
 		isFile = kind == svn.NodeFile
+		missingTarget = kind != svn.NodeNone
 	}
-	if isFile {
+	if isFile || missingTarget {
 		editorAnchor = filepath.Dir(targetPath)
 	}
 	if options.SetDepth != nil {
