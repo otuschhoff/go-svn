@@ -407,6 +407,288 @@ func TestInMemorySwitch(t *testing.T) {
 	}
 }
 
+func TestInMemorySwitchDepthMatrix(t *testing.T) {
+	const rootURL = "memory://wc-switch-depths"
+	repository := inmem.NewRepository(rootURL, "wc-switch-depths-uuid")
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
+		"trunk": inmem.Directory(map[string]*inmem.Node{
+			"target": switchMatrixTree("trunk"),
+		}),
+		"branches": inmem.Directory(map[string]*inmem.Node{
+			"other": switchMatrixTree("branch"),
+		}),
+	})})
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{
+		"trunk": inmem.Directory(map[string]*inmem.Node{
+			"target": switchMatrixTree("trunk"),
+		}),
+		"branches": inmem.Directory(map[string]*inmem.Node{
+			"other": switchMatrixTree("branch two"),
+		}),
+	})})
+	open := func(t *testing.T) ra.Session {
+		session, err := repository.Open(rootURL + "/trunk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	t.Run("depth", func(t *testing.T) { runSwitchDepthMatrix(t, rootURL, 1, open) })
+	t.Run("set-depth", func(t *testing.T) { runSwitchSetDepthMatrix(t, rootURL, 1, open) })
+	t.Run("update", func(t *testing.T) { runSwitchedUpdateDepthMatrix(t, rootURL, 1, 2, open) })
+}
+
+func switchMatrixTree(prefix string) *inmem.Node {
+	return inmem.Directory(map[string]*inmem.Node{
+		"root-file": inmem.File([]byte(prefix + " root\n")),
+		"dir":       inmem.Directory(map[string]*inmem.Node{"child": inmem.File([]byte(prefix + " child\n"))}),
+	})
+}
+
+func TestLocalSwitchDepthMatrix(t *testing.T) {
+	svnadmin := requireTool(t, "svnadmin")
+	svnTool := requireTool(t, "svn")
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v\n%s", err, output)
+	}
+	seed := filepath.Join(root, "seed")
+	base := filepath.Join(seed, "trunk", "target")
+	if err := os.MkdirAll(filepath.Join(base, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "root-file"), []byte("trunk root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "dir", "child"), []byte("trunk child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL).CombinedOutput(); err != nil {
+		t.Fatalf("svn import: %v\n%s", err, output)
+	}
+	if output, err := exec.Command(svnTool, "copy", "-q", "--parents", "-m", "branch", repositoryURL+"/trunk/target", repositoryURL+"/branches/other").CombinedOutput(); err != nil {
+		t.Fatalf("svn copy: %v\n%s", err, output)
+	}
+	author := filepath.Join(root, "author")
+	if output, err := exec.Command(svnTool, "checkout", "-q", repositoryURL+"/branches/other", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn checkout: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(author, "root-file"), []byte("branch root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(author, "dir", "child"), []byte("branch child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(svnTool, "commit", "-q", "-m", "modify branch", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn commit: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(author, "root-file"), []byte("branch two root\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(author, "dir", "child"), []byte("branch two child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(svnTool, "commit", "-q", "-m", "modify branch again", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn commit: %v\n%s", err, output)
+	}
+	open := func(t *testing.T) ra.Session {
+		session, _, err := ra.Open(context.Background(), repositoryURL+"/trunk", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	t.Run("depth", func(t *testing.T) { runSwitchDepthMatrix(t, repositoryURL, 3, open) })
+	t.Run("set-depth", func(t *testing.T) { runSwitchSetDepthMatrix(t, repositoryURL, 3, open) })
+	t.Run("update", func(t *testing.T) { runSwitchedUpdateDepthMatrix(t, repositoryURL, 3, 4, open) })
+}
+
+func runSwitchDepthMatrix(t *testing.T, rootURL string, revision svn.Revnum, open func(*testing.T) ra.Session) {
+	t.Helper()
+	ctx := context.Background()
+	tests := []struct {
+		name                       string
+		depth                      svn.Depth
+		switchRoot, switchChildren bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, switchRoot: true},
+		{name: "immediates", depth: svn.DepthImmediates, switchRoot: true},
+		{name: "infinity", depth: svn.DepthInfinity, switchRoot: true, switchChildren: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			session := open(t)
+			defer session.Close()
+			working := filepath.Join(t.TempDir(), "working")
+			database, err := Checkout(ctx, session, working, revision, UpdateOptions{Depth: svn.DepthInfinity})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			target := filepath.Join(working, "target")
+			if _, err := database.Switch(ctx, session, target, rootURL+"/branches/other", revision, UpdateOptions{Depth: test.depth}); err != nil {
+				t.Fatal(err)
+			}
+			rootPrefix := "trunk"
+			if test.switchRoot {
+				rootPrefix = "branch"
+			}
+			childPrefix := "trunk"
+			if test.switchChildren {
+				childPrefix = "branch"
+			}
+			for name, want := range map[string]string{
+				"root-file": rootPrefix + " root\n",
+				"dir/child": childPrefix + " child\n",
+			} {
+				contents, err := os.ReadFile(filepath.Join(target, filepath.FromSlash(name)))
+				if err != nil || string(contents) != want {
+					t.Fatalf("%s = %q, error = %v, want %q", name, contents, err, want)
+				}
+			}
+			info, err := database.Info(ctx, target)
+			if err != nil || info.RepositoryPath != "branches/other" {
+				t.Fatalf("switched info = %#v, error = %v", info, err)
+			}
+		})
+	}
+}
+
+func runSwitchSetDepthMatrix(t *testing.T, rootURL string, revision svn.Revnum, open func(*testing.T) ra.Session) {
+	t.Helper()
+	ctx := context.Background()
+	depths := []struct {
+		name               string
+		depth              svn.Depth
+		rootFile, dir, kid bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, rootFile: true},
+		{name: "immediates", depth: svn.DepthImmediates, rootFile: true, dir: true},
+		{name: "infinity", depth: svn.DepthInfinity, rootFile: true, dir: true, kid: true},
+	}
+	for _, from := range depths {
+		for _, to := range depths {
+			t.Run(from.name+"-to-"+to.name, func(t *testing.T) {
+				session := open(t)
+				defer session.Close()
+				working := filepath.Join(t.TempDir(), "working")
+				database, err := Checkout(ctx, session, working, revision, UpdateOptions{Depth: svn.DepthInfinity})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer database.Close()
+				target := filepath.Join(working, "target")
+				if _, err := database.Update(ctx, session, target, revision, UpdateOptions{Depth: from.depth, SetDepth: &from.depth}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := database.Switch(ctx, session, target, rootURL+"/branches/other", revision, UpdateOptions{Depth: to.depth, SetDepth: &to.depth}); err != nil {
+					t.Fatal(err)
+				}
+				for name, want := range map[string]struct {
+					exists bool
+					text   string
+				}{
+					"root-file": {exists: to.rootFile, text: "branch root\n"},
+					"dir":       {exists: to.dir},
+					"dir/child": {exists: to.kid, text: "branch child\n"},
+				} {
+					filename := filepath.Join(target, filepath.FromSlash(name))
+					info, err := os.Lstat(filename)
+					if !want.exists {
+						if !os.IsNotExist(err) {
+							t.Fatalf("%s exists as %#v, error = %v", name, info, err)
+						}
+						continue
+					}
+					if err != nil {
+						t.Fatalf("%s missing: %v", name, err)
+					}
+					if want.text != "" {
+						contents, err := os.ReadFile(filename)
+						if err != nil || string(contents) != want.text {
+							t.Fatalf("%s = %q, error = %v, want %q", name, contents, err, want.text)
+						}
+					}
+				}
+				info, err := database.Info(ctx, target)
+				if err != nil || info.RepositoryPath != "branches/other" || info.Depth != to.depth {
+					t.Fatalf("switched info = %#v, error = %v", info, err)
+				}
+			})
+		}
+	}
+}
+
+func runSwitchedUpdateDepthMatrix(t *testing.T, rootURL string, oldRevision, newRevision svn.Revnum, open func(*testing.T) ra.Session) {
+	t.Helper()
+	ctx := context.Background()
+	depths := []struct {
+		name               string
+		depth              svn.Depth
+		rootFile, dir, kid bool
+	}{
+		{name: "empty", depth: svn.DepthEmpty},
+		{name: "files", depth: svn.DepthFiles, rootFile: true},
+		{name: "immediates", depth: svn.DepthImmediates, rootFile: true, dir: true},
+		{name: "infinity", depth: svn.DepthInfinity, rootFile: true, dir: true, kid: true},
+	}
+	for _, from := range depths {
+		for _, to := range depths {
+			t.Run(from.name+"-to-"+to.name, func(t *testing.T) {
+				session := open(t)
+				defer session.Close()
+				working := filepath.Join(t.TempDir(), "working")
+				database, err := Checkout(ctx, session, working, oldRevision, UpdateOptions{Depth: svn.DepthInfinity})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer database.Close()
+				target := filepath.Join(working, "target")
+				if _, err := database.Switch(ctx, session, target, rootURL+"/branches/other", oldRevision, UpdateOptions{Depth: from.depth, SetDepth: &from.depth}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := database.Update(ctx, session, target, newRevision, UpdateOptions{Depth: to.depth, SetDepth: &to.depth}); err != nil {
+					t.Fatal(err)
+				}
+				for name, want := range map[string]struct {
+					exists bool
+					text   string
+				}{
+					"root-file": {exists: to.rootFile, text: "branch two root\n"},
+					"dir":       {exists: to.dir},
+					"dir/child": {exists: to.kid, text: "branch two child\n"},
+				} {
+					filename := filepath.Join(target, filepath.FromSlash(name))
+					info, err := os.Lstat(filename)
+					if !want.exists {
+						if !os.IsNotExist(err) {
+							t.Fatalf("%s exists as %#v, error = %v", name, info, err)
+						}
+						continue
+					}
+					if err != nil {
+						t.Fatalf("%s missing: %v", name, err)
+					}
+					if want.text != "" {
+						contents, err := os.ReadFile(filename)
+						if err != nil || string(contents) != want.text {
+							t.Fatalf("%s = %q, error = %v, want %q", name, contents, err, want.text)
+						}
+					}
+				}
+				info, err := database.Info(ctx, target)
+				if err != nil || info.RepositoryPath != "branches/other" || info.Depth != to.depth || info.Revision != newRevision {
+					t.Fatalf("updated switched info = %#v, error = %v", info, err)
+				}
+			})
+		}
+	}
+}
+
 func TestLargeCheckoutAndAlternatingUpdates(t *testing.T) {
 	svnadmin := requireTool(t, "svnadmin")
 	svnTool := requireTool(t, "svn")

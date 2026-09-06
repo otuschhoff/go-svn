@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -107,7 +108,7 @@ func NewUpdateEditor(ctx context.Context, database *Database, anchorPath string,
 	}
 	repositoryBase := database.repositoryPathForAnchor(anchor)
 	if options.SwitchURL != "" {
-		repositoryBase = sessionPath(database.repository.Root, options.SwitchURL)
+		repositoryBase = strings.TrimPrefix(sessionPath(database.repository.Root, options.SwitchURL), "/")
 	}
 	return &updateEditor{database: database, anchor: anchor, repositoryBase: repositoryBase, repositoryTarget: options.switchTarget, options: options, target: svn.InvalidRevnum, deleted: make(map[string]bool), copySources: make(map[string]nodeRow)}, nil
 }
@@ -151,10 +152,29 @@ func (editor *updateEditor) localPath(editorPath string) string {
 	return filepath.Join(editor.database.wcRoot, filepath.FromSlash(editor.relpath(editorPath)))
 }
 func (editor *updateEditor) repositoryPath(editorPath string) string {
-	if editor.repositoryTarget != "" && editorPath == editor.repositoryTarget {
-		return editor.repositoryBase
+	if editor.repositoryTarget != "" {
+		if editorPath == editor.repositoryTarget {
+			return editor.repositoryBase
+		}
+		if relative, ok := strings.CutPrefix(editorPath, editor.repositoryTarget+"/"); ok {
+			return path.Join(editor.repositoryBase, relative)
+		}
 	}
 	return path.Join(editor.repositoryBase, editorPath)
+}
+
+func (editor *updateEditor) directoryDepth(editorPath string, current svn.Depth) svn.Depth {
+	if editor.options.SetDepth == nil || editor.repositoryTarget == "" {
+		return current
+	}
+	if editorPath == editor.repositoryTarget {
+		return *editor.options.SetDepth
+	}
+	relative, ok := strings.CutPrefix(editorPath, editor.repositoryTarget+"/")
+	if ok && *editor.options.SetDepth == svn.DepthImmediates && !strings.Contains(relative, "/") {
+		return svn.DepthEmpty
+	}
+	return current
 }
 
 func copySourceKey(repositoryPath string, revision svn.Revnum) string {
@@ -381,8 +401,9 @@ func (directory *updateDirectory) DeleteEntry(ctx context.Context, name string, 
 }
 
 func (directory *updateDirectory) AddDirectory(ctx context.Context, name string, source *delta.CopySource) (delta.DirEditor, error) {
+	depth := directory.editor.directoryDepth(name, svn.DepthInfinity)
 	if directory.obstructed {
-		child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: svn.DepthInfinity, obstructed: true, shadowed: true}
+		child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: depth, obstructed: true, shadowed: true}
 		if err := child.writeNode(ctx, PresenceIncomplete); err != nil {
 			return nil, err
 		}
@@ -391,9 +412,9 @@ func (directory *updateDirectory) AddDirectory(ctx context.Context, name string,
 	if info, err := directory.editor.database.Info(ctx, directory.editor.localPath(name)); err == nil {
 		switch info.Schedule {
 		case ScheduleDelete:
-			return &updateDirectory{editor: directory.editor, path: name, props: info.BaseProperties.Clone(), baseProps: info.BaseProperties.Clone(), workingProps: info.WorkingProperties.Clone(), depth: info.Depth, localDeleted: true}, nil
+			return &updateDirectory{editor: directory.editor, path: name, props: info.BaseProperties.Clone(), baseProps: info.BaseProperties.Clone(), workingProps: info.WorkingProperties.Clone(), depth: directory.editor.directoryDepth(name, info.Depth), localDeleted: true}, nil
 		case ScheduleAdd:
-			child := &updateDirectory{editor: directory.editor, path: name, added: true, localAdded: true, props: make(svn.Props), depth: svn.DepthInfinity}
+			child := &updateDirectory{editor: directory.editor, path: name, added: true, localAdded: true, props: make(svn.Props), depth: depth}
 			if err := child.writeNode(ctx, PresenceIncomplete); err != nil {
 				return nil, err
 			}
@@ -401,7 +422,7 @@ func (directory *updateDirectory) AddDirectory(ctx context.Context, name string,
 		}
 	}
 	if _, err := os.Lstat(directory.editor.localPath(name)); err == nil && !directory.editor.deleted[name] {
-		child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: svn.DepthInfinity, obstructed: !directory.editor.options.Force}
+		child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: depth, obstructed: !directory.editor.options.Force}
 		if err := child.writeNode(ctx, PresenceIncomplete); err != nil {
 			return nil, err
 		}
@@ -417,10 +438,10 @@ func (directory *updateDirectory) AddDirectory(ctx context.Context, name string,
 			if err != nil {
 				return nil, err
 			}
-			return &updateDirectory{editor: directory.editor, path: name, added: true, props: properties.Clone(), baseProps: properties.Clone(), workingProps: properties.Clone(), depth: svn.DepthInfinity}, nil
+			return &updateDirectory{editor: directory.editor, path: name, added: true, props: properties.Clone(), baseProps: properties.Clone(), workingProps: properties.Clone(), depth: depth}, nil
 		}
 	}
-	child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: svn.DepthInfinity}
+	child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: depth}
 	if err := child.writeNode(ctx, PresenceIncomplete); err != nil {
 		return nil, err
 	}
@@ -436,7 +457,7 @@ func (directory *updateDirectory) OpenDirectory(ctx context.Context, name string
 	}
 	info, err := directory.editor.database.Info(ctx, directory.editor.localPath(name))
 	if err != nil {
-		return nil, err
+		return directory.AddDirectory(ctx, name, nil)
 	}
 	if info.Conflict != nil && info.Conflict.Tree && info.OperationDepth > 0 {
 		base, err := directory.editor.database.readNode(ctx, "NODES_BASE", directory.editor.relpath(name))
@@ -449,7 +470,7 @@ func (directory *updateDirectory) OpenDirectory(ctx context.Context, name string
 		}
 		return &updateDirectory{editor: directory.editor, path: name, added: true, localAdded: true, conflicted: true, props: baseProps.Clone(), baseProps: baseProps, workingProps: info.WorkingProperties.Clone(), depth: info.Depth}, nil
 	}
-	return &updateDirectory{editor: directory.editor, path: name, props: info.BaseProperties.Clone(), baseProps: info.BaseProperties.Clone(), workingProps: info.WorkingProperties.Clone(), depth: info.Depth, localDeleted: info.Schedule == ScheduleDelete}, nil
+	return &updateDirectory{editor: directory.editor, path: name, props: info.BaseProperties.Clone(), baseProps: info.BaseProperties.Clone(), workingProps: info.WorkingProperties.Clone(), depth: directory.editor.directoryDepth(name, info.Depth), localDeleted: info.Schedule == ScheduleDelete}, nil
 }
 
 func (directory *updateDirectory) ChangeProp(_ context.Context, name string, value []byte) error {
@@ -506,7 +527,7 @@ func (directory *updateDirectory) OpenFile(ctx context.Context, name string, _ s
 	}
 	info, err := directory.editor.database.Info(ctx, directory.editor.localPath(name))
 	if err != nil {
-		return nil, err
+		return directory.AddFile(ctx, name, nil)
 	}
 	status, err := directory.editor.database.statusForInfo(ctx, info)
 	if err != nil {
@@ -620,6 +641,23 @@ func (directory *updateDirectory) writeAbsentFile(ctx context.Context, name stri
 }
 
 func (file *updateFile) ApplyTextDelta(ctx context.Context, base *svn.Checksum) (delta.WindowHandler, error) {
+	if base != nil && file.baseChecksum == nil {
+		column := "checksum"
+		if base.Kind == svn.ChecksumMD5 {
+			column = "md5_checksum"
+		}
+		var serialized string
+		err := file.editor.database.sql.QueryRowContext(ctx, `SELECT checksum FROM PRISTINE WHERE `+column+`=?`, base.Serialize()).Scan(&serialized)
+		if err == nil {
+			checksum, parseErr := svn.ParseChecksum(serialized)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			file.baseChecksum = &checksum
+		} else if err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
 	if base != nil && file.baseChecksum != nil {
 		pristine, err := file.editor.database.Pristine(ctx, *file.baseChecksum)
 		if err != nil {

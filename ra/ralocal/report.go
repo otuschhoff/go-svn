@@ -26,6 +26,7 @@ type report struct {
 	textDeltas     bool
 	sendCopyfrom   bool
 	ignoreAncestry bool
+	explicitSource bool
 	depth          svn.Depth
 	paths          map[string]reportPath
 	done           bool
@@ -40,7 +41,7 @@ type reportPath struct {
 }
 
 func (session *Session) DoUpdate(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, sendCopyfrom bool, ignoreAncestry bool, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, session.join(target), depth, true, sendCopyfrom, ignoreAncestry, editor)
+	return session.newReporter(revision, target, session.join(target), depth, true, sendCopyfrom, ignoreAncestry, false, editor)
 }
 
 func (session *Session) DoSwitch(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, switchURL string, sendCopyfrom bool, ignoreAncestry bool, editor delta.Editor) (ra.Reporter, error) {
@@ -48,11 +49,11 @@ func (session *Session) DoSwitch(_ context.Context, revision svn.Revnum, target 
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", svn.ErrRAIllegalURL, switchURL)
 	}
-	return session.newReporter(revision, target, source, depth, true, sendCopyfrom, ignoreAncestry, editor)
+	return session.newReporter(revision, target, source, depth, true, sendCopyfrom, ignoreAncestry, true, editor)
 }
 
 func (session *Session) DoStatus(_ context.Context, target string, revision svn.Revnum, depth svn.Depth, editor delta.Editor) (ra.Reporter, error) {
-	return session.newReporter(revision, target, session.join(target), depth, false, false, false, editor)
+	return session.newReporter(revision, target, session.join(target), depth, false, false, false, false, editor)
 }
 
 func (session *Session) DoDiff(_ context.Context, revision svn.Revnum, target string, depth svn.Depth, ignoreAncestry bool, textDeltas bool, versusURL string, editor delta.Editor) (ra.Reporter, error) {
@@ -60,14 +61,14 @@ func (session *Session) DoDiff(_ context.Context, revision svn.Revnum, target st
 	if !ok {
 		return nil, fmt.Errorf("%w: %q", svn.ErrRAIllegalURL, versusURL)
 	}
-	return session.newReporter(revision, target, source, depth, textDeltas, false, ignoreAncestry, editor)
+	return session.newReporter(revision, target, source, depth, textDeltas, false, ignoreAncestry, true, editor)
 }
 
-func (session *Session) newReporter(revision svn.Revnum, target, source string, depth svn.Depth, textDeltas, sendCopyfrom, ignoreAncestry bool, editor delta.Editor) (ra.Reporter, error) {
+func (session *Session) newReporter(revision svn.Revnum, target, source string, depth svn.Depth, textDeltas, sendCopyfrom, ignoreAncestry, explicitSource bool, editor delta.Editor) (ra.Reporter, error) {
 	if editor == nil {
 		return nil, fmt.Errorf("%w: nil editor", svn.ErrIncorrectParams)
 	}
-	return &report{session: session, revision: revision, target: target, source: source, editor: editor, depth: depth, baseRev: svn.InvalidRevnum, textDeltas: textDeltas, sendCopyfrom: sendCopyfrom, ignoreAncestry: ignoreAncestry, paths: make(map[string]reportPath)}, nil
+	return &report{session: session, revision: revision, target: target, source: source, editor: editor, depth: depth, baseRev: svn.InvalidRevnum, textDeltas: textDeltas, sendCopyfrom: sendCopyfrom, ignoreAncestry: ignoreAncestry, explicitSource: explicitSource, paths: make(map[string]reportPath)}, nil
 }
 
 func (reporter *report) SetPath(_ context.Context, name string, revision svn.Revnum, depth svn.Depth, startEmpty bool, _ string) error {
@@ -106,10 +107,15 @@ func (reporter *report) FinishReport(ctx context.Context) error {
 	lookup := reporter.baseLookup()
 	editor := delta.DepthFilter(reporter.editor, reporter.depth, "")
 	rootPath := reporter.source
+	rootReport, hasRootReport := reporter.paths[""]
+	if hasRootReport && rootReport.source != "" && !reporter.explicitSource {
+		rootPath = rootReport.source
+	}
 	kind, err := targetRoot.CheckPath(ctx, reporter.source)
 	if err != nil {
 		return err
 	}
+	currentKind := kind
 	if kind == svn.NodeNone && reporter.baseRev.IsValid() {
 		baseRoot, _, rootErr := reporter.session.repository.Root(ctx, reporter.baseRev)
 		if rootErr != nil {
@@ -120,9 +126,9 @@ func (reporter *report) FinishReport(ctx context.Context) error {
 			return err
 		}
 	}
-	rootReport, hasRootReport := reporter.paths[""]
-	missingTarget := hasRootReport && rootReport.deleted && reporter.target != "" && kind != svn.NodeNone
-	if kind != svn.NodeDir || missingTarget {
+	missingTarget := hasRootReport && rootReport.deleted && reporter.target != ""
+	deletedTarget := currentKind == svn.NodeNone && kind != svn.NodeNone && reporter.target != ""
+	if kind != svn.NodeDir || missingTarget || deletedTarget {
 		name := path.Base(reporter.target)
 		if reporter.target == "" {
 			name = path.Base(reporter.source)
@@ -130,11 +136,13 @@ func (reporter *report) FinishReport(ctx context.Context) error {
 		rootPath = path.Dir(reporter.source)
 		editor = delta.DepthFilter(reporter.editor, reporter.depth, name)
 		if missingTarget {
+			previousRevision := reporter.revision - 1
+			previousRoot, _, previousErr := reporter.session.repository.Root(ctx, previousRevision)
 			lookup = func(_ context.Context, editorPath string) (fs.Root, string, svn.Revnum, error) {
-				if editorPath == name || strings.HasPrefix(editorPath, name+"/") {
-					return nil, "", svn.InvalidRevnum, nil
+				if previousErr != nil {
+					return nil, "", svn.InvalidRevnum, previousErr
 				}
-				return targetRoot, path.Join(rootPath, editorPath), reporter.revision, nil
+				return previousRoot, path.Join(rootPath, editorPath), previousRevision, nil
 			}
 		} else {
 			lookup = reporter.fileTargetLookup(ctx, name, rootPath)
@@ -286,18 +294,18 @@ func driveRoots(ctx context.Context, editor delta.Editor, repository *repos.Repo
 	if excluded == nil || !excluded("") {
 		if err := changeNodeProps(ctx, output.ChangeProp, oldRoot, oldPath, currentRoot, rootPath); err != nil {
 			_ = editor.AbortEdit(ctx)
-			return err
+			return fmt.Errorf("report root properties %s: %w", rootPath, err)
 		}
 	}
 	changes, err := currentRoot.PathsChanged(ctx)
 	if err != nil {
 		_ = editor.AbortEdit(ctx)
-		return err
+		return fmt.Errorf("report changed paths: %w", err)
 	}
 	if excluded == nil || !excluded("") {
 		if err := diffDirectory(ctx, output, repository, lookup, excluded, currentRoot, rootPath, "", revision, textDeltas, sendCopyfrom, ignoreAncestry, copyFloor, changes); err != nil {
 			_ = editor.AbortEdit(ctx)
-			return err
+			return fmt.Errorf("report directory diff %s: %w", rootPath, err)
 		}
 	}
 	if err := output.Close(ctx); err != nil {

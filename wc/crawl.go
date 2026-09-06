@@ -16,6 +16,10 @@ type reportNode struct {
 }
 
 func (database *Database) Crawl(ctx context.Context, targetPath string, depth svn.Depth, reporter ra.Reporter) (resultErr error) {
+	return database.crawl(ctx, targetPath, depth, reporter, false, false)
+}
+
+func (database *Database) crawl(ctx context.Context, targetPath string, depth svn.Depth, reporter ra.Reporter, emptyRoot, suppressRootLink bool) (resultErr error) {
 	target, err := database.localRelpath(targetPath)
 	if err != nil {
 		return err
@@ -54,7 +58,12 @@ func (database *Database) Crawl(ctx context.Context, targetPath string, depth sv
 		}
 	}
 	if len(nodes) == 0 {
-		if err := reporter.DeletePath(ctx, ""); err != nil {
+		if emptyRoot {
+			err = reporter.SetPath(ctx, "", 0, depth, true, "")
+		} else {
+			err = reporter.DeletePath(ctx, "")
+		}
+		if err != nil {
 			return err
 		}
 		return reporter.FinishReport(ctx)
@@ -87,7 +96,7 @@ func (database *Database) Crawl(ctx context.Context, targetPath string, depth sv
 			}
 		}
 		expectedReposPath := path.Join(parentReposPath, path.Base(row.relpath))
-		switched := row.relpath != "" && expectedReposPath != row.reposPath
+		switched := row.relpath != "" && expectedReposPath != row.reposPath && !(suppressRootLink && reportPath == "")
 		parentRevision, parentKnown := revisions[parent]
 		mustReport := index == 0 || switched || !parentKnown || row.revision != parentRevision || item.lock != "" || row.presence == string(PresenceIncomplete) || (row.kind == svn.NodeDir.String() && nodeDepth != svn.DepthInfinity)
 		if mustReport {

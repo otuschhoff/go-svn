@@ -671,9 +671,18 @@ func (report *report) FinishReport(ctx context.Context) error {
 		}
 		setNode(base, name, node)
 	}
+	rootEntry, hasRootEntry := report.entries[""]
+	if base == nil && hasRootEntry && rootEntry.deleted && report.target != "" && report.revision > 0 {
+		previous, revisionErr := report.session.revision(report.revision - 1)
+		if revisionErr != nil {
+			return revisionErr
+		}
+		base = cloneNode(findNode(previous.Root, report.source))
+	}
 	editor := delta.DepthFilter(report.editor, report.depth, "")
-	missingTarget := base == nil && target != nil && report.target != ""
-	if target != nil && target.Kind != svn.NodeDir || base != nil && base.Kind != svn.NodeDir || missingTarget {
+	missingTarget := base == nil && report.target != "" && (target != nil || hasRootEntry && rootEntry.deleted)
+	deletedTarget := target == nil && base != nil && report.target != ""
+	if target != nil && target.Kind != svn.NodeDir || base != nil && base.Kind != svn.NodeDir || missingTarget || deletedTarget {
 		name := path.Base(report.target)
 		if report.target == "" {
 			name = path.Base(report.source)

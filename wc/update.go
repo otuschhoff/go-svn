@@ -3,9 +3,11 @@ package wc
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/otuschhoff/go-svn/ra"
 	"github.com/otuschhoff/go-svn/svn"
@@ -30,9 +32,13 @@ func Checkout(ctx context.Context, session ra.Session, destination string, revis
 	if err != nil {
 		return nil, err
 	}
+	initialRevision := svn.Revnum(0)
+	if isNetworkSession(session) {
+		initialRevision = revision
+	}
 	database, err := Create(ctx, destination, CreateOptions{
-		RepositoryRoot: root, RepositoryUUID: uuid, RepositoryPath: sessionPath(root, session.URL()),
-		Revision: 0, Depth: options.Depth,
+		RepositoryRoot: root, RepositoryUUID: uuid, RepositoryPath: strings.TrimPrefix(sessionPath(root, session.URL()), "/"),
+		Revision: initialRevision, Depth: options.Depth,
 	})
 	if err != nil {
 		return nil, err
@@ -59,16 +65,31 @@ func (database *Database) Update(ctx context.Context, session ra.Session, target
 	editorAnchor := targetPath
 	info, infoErr := database.Info(ctx, targetPath)
 	isFile := infoErr == nil && info.Kind != svn.NodeDir
-	missingTarget := false
 	if infoErr != nil {
 		kind, checkErr := session.CheckPath(ctx, target, revision)
 		if checkErr != nil {
 			return svn.InvalidRevnum, checkErr
 		}
 		isFile = kind == svn.NodeFile
-		missingTarget = kind != svn.NodeNone
 	}
-	if isFile || missingTarget {
+	sessionURL, parseErr := url.Parse(session.URL())
+	protocolTarget := parseErr == nil && target != "" && (sessionURL.Scheme == "svn" || sessionURL.Scheme == "svn+ssh" || sessionURL.Scheme == "http" || sessionURL.Scheme == "https")
+	reportTarget := target
+	suppressRootLink := false
+	if protocolTarget {
+		editorAnchor = database.wcRoot
+		expectedURL := strings.TrimSuffix(session.URL(), "/") + "/" + target
+		if infoErr == nil && strings.TrimSuffix(info.URL, "/") != strings.TrimSuffix(expectedURL, "/") {
+			originalURL := session.URL()
+			if err := session.Reparent(ctx, info.URL); err != nil {
+				return svn.InvalidRevnum, err
+			}
+			defer session.Reparent(context.Background(), originalURL)
+			reportTarget = ""
+			editorAnchor = targetPath
+			suppressRootLink = true
+		}
+	} else if isFile || infoErr != nil {
 		editorAnchor = filepath.Dir(targetPath)
 	}
 	if options.SetDepth != nil {
@@ -81,11 +102,11 @@ func (database *Database) Update(ctx context.Context, session ra.Session, target
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
-	reporter, err := session.DoUpdate(ctx, revision, target, options.Depth, true, false, editor)
+	reporter, err := session.DoUpdate(ctx, revision, reportTarget, options.Depth, !isNetworkSession(session), false, editor)
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
-	if err := database.Crawl(ctx, targetPath, options.Depth, reporter); err != nil {
+	if err := database.crawl(ctx, targetPath, options.Depth, reporter, isNetworkSession(session), suppressRootLink); err != nil {
 		_ = reporter.AbortReport(ctx)
 		return svn.InvalidRevnum, err
 	}
@@ -112,7 +133,10 @@ func (database *Database) Switch(ctx context.Context, session ra.Session, target
 	editorAnchor := targetPath
 	info, infoErr := database.Info(ctx, targetPath)
 	isFile := infoErr == nil && info.Kind != svn.NodeDir
-	if isFile {
+	if isNetworkSession(session) && target != "" {
+		editorAnchor = database.wcRoot
+		options.switchTarget = target
+	} else if isFile {
 		editorAnchor = filepath.Dir(targetPath)
 		options.switchTarget = filepath.Base(targetPath)
 	}
@@ -127,11 +151,11 @@ func (database *Database) Switch(ctx context.Context, session ra.Session, target
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
-	reporter, err := session.DoSwitch(ctx, revision, target, options.Depth, switchURL, true, false, editor)
+	reporter, err := session.DoSwitch(ctx, revision, target, options.Depth, switchURL, !isNetworkSession(session), false, editor)
 	if err != nil {
 		return svn.InvalidRevnum, err
 	}
-	if err := database.Crawl(ctx, targetPath, options.Depth, reporter); err != nil {
+	if err := database.crawl(ctx, targetPath, options.Depth, reporter, isNetworkSession(session), false); err != nil {
 		_ = reporter.AbortReport(ctx)
 		return svn.InvalidRevnum, err
 	}
@@ -141,6 +165,14 @@ func (database *Database) Switch(ctx context.Context, session ra.Session, target
 		}
 	}
 	return revision, nil
+}
+
+func isNetworkSession(session ra.Session) bool {
+	sessionURL, err := url.Parse(session.URL())
+	if err != nil {
+		return false
+	}
+	return sessionURL.Scheme == "svn" || sessionURL.Scheme == "svn+ssh" || sessionURL.Scheme == "http" || sessionURL.Scheme == "https"
 }
 
 func (database *Database) depthPruneCandidates(ctx context.Context, target string, depth svn.Depth) ([]string, error) {
@@ -154,6 +186,9 @@ func (database *Database) depthPruneCandidates(ctx context.Context, target strin
 		var relpath, kind string
 		if err := rows.Scan(&relpath, &kind); err != nil {
 			return nil, err
+		}
+		if target != "" && relpath != target && !strings.HasPrefix(relpath, target+"/") {
+			continue
 		}
 		if relpath != target && !withinDepth(target, relpath, depth, kind != svn.NodeDir.String()) {
 			result = append(result, relpath)

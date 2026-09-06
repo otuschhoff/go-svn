@@ -13,6 +13,10 @@ import (
 type PathDriverFunc func(context.Context, DirEditor, string) (DirEditor, error)
 
 func PathDriver(ctx context.Context, root DirEditor, paths []string, baseRevision svn.Revnum, callback PathDriverFunc) error {
+	return PathDriverRevisions(ctx, root, paths, func(string) svn.Revnum { return baseRevision }, callback)
+}
+
+func PathDriverRevisions(ctx context.Context, root DirEditor, paths []string, revision func(string) svn.Revnum, callback PathDriverFunc) error {
 	canonical := make([]string, len(paths))
 	for index, path := range paths {
 		canonical[index] = svnpath.RelpathCanonicalize(path)
@@ -52,7 +56,7 @@ func PathDriver(ctx context.Context, root DirEditor, paths []string, baseRevisio
 				continue
 			}
 			current = svnpath.RelpathJoin(current, component)
-			opened, err := stack[len(stack)-1].editor.OpenDirectory(ctx, current, baseRevision)
+			opened, err := stack[len(stack)-1].editor.OpenDirectory(ctx, current, revision(current))
 			if err != nil {
 				return err
 			}

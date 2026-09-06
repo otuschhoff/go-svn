@@ -128,6 +128,29 @@ func TestPathDriverKeepsReturnedDirectoryOpen(t *testing.T) {
 	}
 }
 
+func TestPathDriverUsesDirectoryRevisions(t *testing.T) {
+	var trace bytes.Buffer
+	editor := Trace(&trace, Noop())
+	root, _ := editor.OpenRoot(context.Background(), 1)
+	revisions := map[string]svn.Revnum{"a": 3, "a/b": 7}
+	err := PathDriverRevisions(context.Background(), root, []string{"a/b/file"}, func(path string) svn.Revnum {
+		return revisions[path]
+	}, func(ctx context.Context, parent DirEditor, path string) (DirEditor, error) {
+		_, err := parent.OpenFile(ctx, path, 9)
+		return nil, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"open-root 1", "open-directory a 3", "open-directory a/b 7", "open-file a/b/file 9",
+		"close-directory", "close-directory", "",
+	}, "\n")
+	if trace.String() != want {
+		t.Fatalf("trace:\n%s\nwant:\n%s", trace.String(), want)
+	}
+}
+
 func TestPathDriverRejectsInvalidTargets(t *testing.T) {
 	root, _ := Noop().OpenRoot(context.Background(), 1)
 	callback := func(context.Context, DirEditor, string) (DirEditor, error) { return nil, nil }

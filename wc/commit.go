@@ -77,9 +77,30 @@ func (database *Database) Commit(ctx context.Context, session ra.Session, target
 		err = sendPropertyChanges(ctx, root.ChangeProp, rootNode.info.BaseProperties, rootNode.properties)
 	}
 	if err == nil {
-		err = delta.PathDriver(ctx, root, commitPaths(nodes), baseInfo.Revision, func(ctx context.Context, parent delta.DirEditor, relpath string) (delta.DirEditor, error) {
-			return database.driveCommitNode(ctx, parent, relpath, nodes)
-		})
+		directoryRevisions := map[string]svn.Revnum{"": baseInfo.Revision}
+		for relpath := range nodes {
+			for parent := path.Dir(relpath); parent != "."; parent = path.Dir(parent) {
+				if _, exists := directoryRevisions[parent]; exists {
+					continue
+				}
+				info, infoErr := database.Info(ctx, filepath.Join(database.wcRoot, filepath.FromSlash(parent)))
+				if infoErr != nil {
+					err = infoErr
+					break
+				}
+				directoryRevisions[parent] = info.Revision
+			}
+			if err != nil {
+				break
+			}
+		}
+		if err == nil {
+			err = delta.PathDriverRevisions(ctx, root, commitPaths(nodes), func(relpath string) svn.Revnum {
+				return directoryRevisions[relpath]
+			}, func(ctx context.Context, parent delta.DirEditor, relpath string) (delta.DirEditor, error) {
+				return database.driveCommitNode(ctx, parent, relpath, nodes)
+			})
+		}
 	}
 	if err == nil {
 		err = root.Close(ctx)
@@ -334,11 +355,19 @@ func (database *Database) preparePostCommit(ctx context.Context, targetRelpath s
 	defer transaction.Rollback()
 	for _, node := range nodes {
 		relpath := node.info.RelativePath
-		if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND local_relpath=? AND op_depth>0`, database.wcID, relpath); err != nil {
+		if node.status.NodeStatus == StatusDeleted {
+			if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND (local_relpath=? OR local_relpath LIKE ? ESCAPE '#')`, database.wcID, relpath, descendantPattern(relpath)); err != nil {
+				return err
+			}
+		} else if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND local_relpath=? AND op_depth>0`, database.wcID, relpath); err != nil {
 			return err
 		}
 		if options.KeepChangelists && node.info.Changelist != "" {
 			if _, err := transaction.ExecContext(ctx, `UPDATE ACTUAL_NODE SET properties=NULL, conflict_data=NULL WHERE wc_id=? AND local_relpath=?`, database.wcID, relpath); err != nil {
+				return err
+			}
+		} else if node.status.NodeStatus == StatusDeleted {
+			if _, err := transaction.ExecContext(ctx, `DELETE FROM ACTUAL_NODE WHERE wc_id=? AND (local_relpath=? OR local_relpath LIKE ? ESCAPE '#')`, database.wcID, relpath, descendantPattern(relpath)); err != nil {
 				return err
 			}
 		} else if _, err := transaction.ExecContext(ctx, `DELETE FROM ACTUAL_NODE WHERE wc_id=? AND local_relpath=?`, database.wcID, relpath); err != nil {
