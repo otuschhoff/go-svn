@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 const maxRecordSize = 64 << 20

@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func tunnelConnection(ctx context.Context, parsed *url.URL, callbacks *ra.Callbacks) (*connection, error) {

@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/ra/conformance"
-	"github.com/oliver-tuschhoff/go-svn/ra/inmem"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/ra/conformance"
+	"github.com/otuschhoff/go-svn/ra/inmem"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestConformance(t *testing.T) {

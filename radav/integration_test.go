@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/auth"
-	"github.com/oliver-tuschhoff/go-svn/config"
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil"
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil/servers"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/ra/conformance"
-	_ "github.com/oliver-tuschhoff/go-svn/radav"
+	"github.com/otuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/config"
+	"github.com/otuschhoff/go-svn/internal/testutil"
+	"github.com/otuschhoff/go-svn/internal/testutil/servers"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/ra/conformance"
+	_ "github.com/otuschhoff/go-svn/radav"
 )
 
 func TestSessionAgainstHTTPD(t *testing.T) {

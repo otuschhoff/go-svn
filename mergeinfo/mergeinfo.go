@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
-	svnpath "github.com/oliver-tuschhoff/go-svn/svn/path"
+	"github.com/otuschhoff/go-svn/svn"
+	svnpath "github.com/otuschhoff/go-svn/svn/path"
 )
 
 type Inheritance uint8

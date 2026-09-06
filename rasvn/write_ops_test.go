@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestChangeRevProp2Wire(t *testing.T) {

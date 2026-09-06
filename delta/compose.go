@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func Compose(editors ...Editor) Editor {

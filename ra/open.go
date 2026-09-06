@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type Factory func(context.Context, *url.URL, *Callbacks) (Session, string, error)

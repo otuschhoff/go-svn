@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 const (

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type KeywordValues map[string]string

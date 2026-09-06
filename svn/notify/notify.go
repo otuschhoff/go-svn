@@ -1,7 +1,7 @@
 package notify
 
 import (
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type Action uint16

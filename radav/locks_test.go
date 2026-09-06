@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestLockUnlockAndAtomicRevpropRequests(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type editorDriver struct {

@@ -1,3 +1,3 @@
-module github.com/oliver-tuschhoff/go-svn
+module github.com/otuschhoff/go-svn
 
 go 1.23.0

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil"
+	"github.com/otuschhoff/go-svn/internal/testutil"
 )
 
 func TunnelScript(t testing.TB, repositoryRoot string) string {

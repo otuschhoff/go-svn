@@ -8,9 +8,9 @@ import (
 	"net"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestCommitEditorStreamsDeltaAndCommitInfo(t *testing.T) {

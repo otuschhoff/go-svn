@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 // WindowReader streams windows. It returns io.EOF after the final window.

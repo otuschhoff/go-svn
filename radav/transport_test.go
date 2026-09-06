@@ -3,7 +3,7 @@ package radav
 import (
 	"bytes"
 	"context"
-	"github.com/oliver-tuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/auth"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/config"
-	"github.com/oliver-tuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/config"
+	"github.com/otuschhoff/go-svn/ra"
 )
 
 func TestTLSTrustPromptIsCachedForSession(t *testing.T) {

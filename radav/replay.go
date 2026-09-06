@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func (session *Session) Replay(ctx context.Context, revision, lowWaterMark svn.Revnum, sendDeltas bool, editor delta.Editor) error {

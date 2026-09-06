@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
-	"github.com/oliver-tuschhoff/go-svn/svn/hashfile"
+	"github.com/otuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn/hashfile"
 )
 
 type Kind string

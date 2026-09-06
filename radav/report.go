@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func (session *Session) report(ctx context.Context, rawURL string, body []byte, decode func(*xml.Decoder) error) error {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func (session *Session) lockMany(ctx context.Context, paths []string, comment Item, steal bool, entries Item, callback ra.LockCallback) (resultErr error) {

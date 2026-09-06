@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/auth"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func (conn *connection) runSASL(ctx context.Context, mechanisms []string, realm string) error {

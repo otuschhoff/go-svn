@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestTreeBuilderBuildsSnapshot(t *testing.T) {

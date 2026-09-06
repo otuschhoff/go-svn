@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestUpdateAndReplayDriveEditors(t *testing.T) {

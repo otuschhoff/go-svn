@@ -9,8 +9,8 @@ import (
 	"io"
 	"math"
 
-	"github.com/oliver-tuschhoff/go-svn/internal/lz4"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/internal/lz4"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 const (

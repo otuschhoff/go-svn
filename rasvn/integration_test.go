@@ -19,14 +19,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil"
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil/servers"
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/ra/conformance"
-	_ "github.com/oliver-tuschhoff/go-svn/rasvn"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/internal/testutil"
+	"github.com/otuschhoff/go-svn/internal/testutil/servers"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/ra/conformance"
+	_ "github.com/otuschhoff/go-svn/rasvn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestReadSessionAgainstSvnserve(t *testing.T) {

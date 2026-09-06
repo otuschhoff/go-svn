@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/oliver-tuschhoff/go-svn/internal/lz4"
+	"github.com/otuschhoff/go-svn/internal/lz4"
 )
 
 type Encoder struct {

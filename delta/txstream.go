@@ -7,7 +7,7 @@ import (
 	"hash"
 	"io"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type TxDeltaStream struct {

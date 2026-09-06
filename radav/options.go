@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type ServerInfo struct {

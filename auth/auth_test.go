@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
-	"github.com/oliver-tuschhoff/go-svn/svn/hashfile"
+	"github.com/otuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn/hashfile"
 )
 
 func TestDiskProviderRoundTrip(t *testing.T) {

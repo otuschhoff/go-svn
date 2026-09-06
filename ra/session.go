@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/auth"
-	"github.com/oliver-tuschhoff/go-svn/config"
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/svn"
-	"github.com/oliver-tuschhoff/go-svn/svn/notify"
+	"github.com/otuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/config"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn/notify"
 )
 
 type Session interface {

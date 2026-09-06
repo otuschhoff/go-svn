@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func Trace(writer io.Writer, editor Editor) Editor {

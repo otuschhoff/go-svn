@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/internal/testutil"
+	"github.com/otuschhoff/go-svn/internal/testutil"
 )
 
 type DockerOptions struct {

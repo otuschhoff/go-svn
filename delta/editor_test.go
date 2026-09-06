@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestNoopEditor(t *testing.T) {

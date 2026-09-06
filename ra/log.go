@@ -1,7 +1,7 @@
 package ra
 
 import (
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 type LogOptions struct {

@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/oliver-tuschhoff/go-svn/auth"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 const maxAuthAttempts = 8

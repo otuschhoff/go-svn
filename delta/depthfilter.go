@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
-	svnpath "github.com/oliver-tuschhoff/go-svn/svn/path"
+	"github.com/otuschhoff/go-svn/svn"
+	svnpath "github.com/otuschhoff/go-svn/svn/path"
 )
 
 func DepthFilter(editor Editor, depth svn.Depth, target string) Editor {

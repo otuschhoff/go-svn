@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func (session *Session) GetFile(ctx context.Context, name string, revision svn.Revnum, output io.Writer, wantProps bool) (svn.Revnum, svn.Props, error) {

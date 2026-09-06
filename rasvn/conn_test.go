@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/auth"
-	"github.com/oliver-tuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/auth"
+	"github.com/otuschhoff/go-svn/ra"
 )
 
 func TestAnonymousHandshake(t *testing.T) {

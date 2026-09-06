@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func TestReadReports(t *testing.T) {

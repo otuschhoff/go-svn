@@ -18,11 +18,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oliver-tuschhoff/go-svn/delta"
-	"github.com/oliver-tuschhoff/go-svn/mergeinfo"
-	"github.com/oliver-tuschhoff/go-svn/ra"
-	"github.com/oliver-tuschhoff/go-svn/rasvn"
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/delta"
+	"github.com/otuschhoff/go-svn/mergeinfo"
+	"github.com/otuschhoff/go-svn/ra"
+	"github.com/otuschhoff/go-svn/rasvn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 func main() {

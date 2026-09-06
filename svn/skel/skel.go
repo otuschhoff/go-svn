@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/oliver-tuschhoff/go-svn/svn"
+	"github.com/otuschhoff/go-svn/svn"
 )
 
 const (
