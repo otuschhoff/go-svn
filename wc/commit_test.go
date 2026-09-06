@@ -86,11 +86,23 @@ func TestCommitWorkingCopyRoundTrip(t *testing.T) {
 	if err := database.SetProperty(context.Background(), modified, "custom", []byte("value"), false); err != nil {
 		t.Fatal(err)
 	}
+	if err := database.SetProperty(context.Background(), working, "root-custom", []byte("root-value"), false); err != nil {
+		t.Fatal(err)
+	}
 	added := filepath.Join(working, "added")
 	if err := os.WriteFile(added, []byte("added\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Add(context.Background(), added, AddOptions{}); err != nil {
+	if err := database.Add(context.Background(), added, AddOptions{AutoProps: map[string]svn.Props{
+		"added": {"auto-custom": []byte("auto-value")},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	special := filepath.Join(working, "special")
+	if err := os.Symlink("modified", special); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Add(context.Background(), special, AddOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Delete(context.Background(), filepath.Join(working, "deleted"), DeleteOptions{}); err != nil {
@@ -110,6 +122,19 @@ func TestCommitWorkingCopyRoundTrip(t *testing.T) {
 		if _, _, err := session.GetFile(context.Background(), name, 2, &contents, false); err != nil || contents.String() != want {
 			t.Fatalf("repository %s = %q, error = %v", name, contents.String(), err)
 		}
+	}
+	_, addedProperties, err := session.GetFile(context.Background(), "added", 2, nil, true)
+	if err != nil || string(addedProperties["auto-custom"]) != "auto-value" {
+		t.Fatalf("added properties = %#v, error = %v", addedProperties, err)
+	}
+	_, _, rootProperties, err := session.GetDir(context.Background(), "", 2, 0)
+	if err != nil || string(rootProperties["root-custom"]) != "root-value" {
+		t.Fatalf("root properties = %#v, error = %v", rootProperties, err)
+	}
+	var specialContents bytes.Buffer
+	_, specialProperties, err := session.GetFile(context.Background(), "special", 2, &specialContents, true)
+	if err != nil || specialContents.String() != "link modified" || string(specialProperties["svn:special"]) != "*" {
+		t.Fatalf("repository special = %q, properties = %#v, error = %v", specialContents.String(), specialProperties, err)
 	}
 	translatedInfo, err := database.Info(context.Background(), translated)
 	if err != nil {

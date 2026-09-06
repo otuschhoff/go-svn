@@ -146,6 +146,8 @@ func (database *Database) infoFromRows(ctx context.Context, current, base *nodeR
 		if err != nil {
 			return nil, err
 		}
+	} else if current.opDepth > 0 && !current.revision.IsValid() {
+		baseProperties = make(svn.Props)
 	}
 	if actual != nil && actual.properties != nil {
 		properties, err = parseProperties(actual.properties)

@@ -484,6 +484,12 @@ func (root *Root) directoryEntries(ctx context.Context, node NodeRevision) (map[
 	if node.Kind != svn.NodeDir {
 		return nil, fmt.Errorf("%w: node is not a directory", svn.ErrFSNotDirectory)
 	}
+	root.directoryCacheMu.RLock()
+	entries := root.directoryCache[node.ID]
+	root.directoryCacheMu.RUnlock()
+	if entries != nil {
+		return entries, nil
+	}
 	if node.Text == nil {
 		return make(map[string]directoryEntry), nil
 	}
@@ -491,7 +497,17 @@ func (root *Root) directoryEntries(ctx context.Context, node NodeRevision) (map[
 	if err := root.filesystem.writeRepresentation(ctx, node.Text, &data); err != nil {
 		return nil, err
 	}
-	return parseDirectoryEntries(data.Bytes())
+	entries, err := parseDirectoryEntries(data.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	root.directoryCacheMu.Lock()
+	if root.directoryCache == nil {
+		root.directoryCache = make(map[ID]map[string]directoryEntry)
+	}
+	root.directoryCache[node.ID] = entries
+	root.directoryCacheMu.Unlock()
+	return entries, nil
 }
 
 func parseDirectoryEntries(data []byte) (map[string]directoryEntry, error) {

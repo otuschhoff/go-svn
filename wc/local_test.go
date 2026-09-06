@@ -49,6 +49,12 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "delete-tree", "nested", "child"), []byte("nested\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(seed, "delete-added"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(seed, "delete-added", "base"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
@@ -76,6 +82,21 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 	if err := database.Revert(context.Background(), deleteChild, RevertOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	if err := database.SetChangelist(context.Background(), deleteChild, "review"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(deleteChild, []byte("changelist edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Revert(context.Background(), deleteChild, RevertOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := database.Info(context.Background(), deleteChild); err != nil || info.Changelist != "review" {
+		t.Fatalf("changelist after revert = %q, error = %v", info.Changelist, err)
+	}
+	if err := database.SetChangelist(context.Background(), deleteChild, ""); err != nil {
+		t.Fatal(err)
+	}
 	nestedDeleteChild := filepath.Join(deleteTree, "nested", "child")
 	if err := os.WriteFile(deleteChild, []byte("direct edit\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -95,6 +116,24 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 	if err := database.Revert(context.Background(), deleteTree, RevertOptions{Depth: svn.DepthInfinity}); err != nil {
 		t.Fatal(err)
 	}
+	deleteAdded := filepath.Join(working, "delete-added")
+	addedChild := filepath.Join(deleteAdded, "added")
+	if err := os.WriteFile(addedChild, []byte("added\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Add(context.Background(), addedChild, AddOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Delete(context.Background(), deleteAdded, DeleteOptions{}); !errors.Is(err, svn.ErrClientModified) {
+		t.Fatalf("delete tree with added child error = %v", err)
+	}
+	if err := database.Delete(context.Background(), deleteAdded, DeleteOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+	var addedRows int
+	if err := database.sql.QueryRow(`SELECT COUNT(*) FROM NODES_CURRENT WHERE wc_id=? AND local_relpath=?`, database.wcID, "delete-added/added").Scan(&addedRows); err != nil || addedRows != 0 {
+		t.Fatalf("added child rows after forced delete = %d, error = %v", addedRows, err)
+	}
 
 	added := filepath.Join(working, "added")
 	if err := os.WriteFile(added, []byte("new\n"), 0o644); err != nil {
@@ -103,8 +142,16 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 	if err := database.Add(context.Background(), added, AddOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	addedMoved := filepath.Join(working, "added-moved")
+	if err := database.Move(context.Background(), added, addedMoved, false); err != nil {
+		t.Fatal(err)
+	}
 	directory := filepath.Join(working, "newdir")
 	if err := database.Mkdir(context.Background(), directory, false); err != nil {
+		t.Fatal(err)
+	}
+	nestedDirectory := filepath.Join(working, "parents", "nested")
+	if err := database.Mkdir(context.Background(), nestedDirectory, true); err != nil {
 		t.Fatal(err)
 	}
 	tracked := filepath.Join(working, "tracked")
@@ -137,10 +184,13 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 		t.Fatalf("svn status: %v\n%s", err, output)
 	}
 	status := string(output)
-	for _, expected := range []string{"A       " + added, "A  +    " + copied, "A       " + directory, "D       " + tracked, "D       " + moveSource, "A  +    " + moved} {
+	for _, expected := range []string{"A       " + addedMoved, "A  +    " + copied, "A       " + directory, "A       " + filepath.Dir(nestedDirectory), "A       " + nestedDirectory, "D       " + tracked, "D       " + moveSource, "A  +    " + moved} {
 		if !strings.Contains(status, expected) {
 			t.Fatalf("svn status missing %q:\n%s", expected, status)
 		}
+	}
+	if err := database.SetChangelist(context.Background(), tracked, ""); err != nil {
+		t.Fatal(err)
 	}
 	if err := database.Revert(context.Background(), working, RevertOptions{Depth: svn.DepthInfinity, RemoveAdded: true}); err != nil {
 		t.Fatal(err)

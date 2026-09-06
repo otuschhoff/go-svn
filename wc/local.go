@@ -93,7 +93,9 @@ func (database *Database) addPath(ctx context.Context, relpath string, stat os.F
 				}
 			}
 		}
-		if options.DetectMIMEType && len(properties[props.MIMEType]) == 0 {
+		if stat.Mode()&os.ModeSymlink != 0 {
+			properties[props.Special] = []byte("*")
+		} else if options.DetectMIMEType && len(properties[props.MIMEType]) == 0 {
 			file, err := os.Open(filepath.Join(database.wcRoot, filepath.FromSlash(relpath)))
 			if err != nil {
 				return err
@@ -190,7 +192,7 @@ func (database *Database) Mkdir(ctx context.Context, targetPath string, parents 
 	if err != nil {
 		return err
 	}
-	return database.Add(ctx, targetPath, AddOptions{Depth: svn.DepthInfinity})
+	return database.Add(ctx, targetPath, AddOptions{Depth: svn.DepthInfinity, Parents: parents})
 }
 
 func (database *Database) Copy(ctx context.Context, sourcePath, destinationPath string) error {
@@ -269,11 +271,18 @@ func (database *Database) Move(ctx context.Context, sourcePath, destinationPath 
 	if err != nil {
 		return err
 	}
+	sourceInfo, err := database.Info(ctx, sourcePath)
+	if err != nil {
+		return err
+	}
 	if err := database.Copy(ctx, sourcePath, destinationPath); err != nil {
 		return err
 	}
 	if err := database.Delete(ctx, sourcePath, DeleteOptions{Force: true}); err != nil {
 		return err
+	}
+	if !sourceInfo.Revision.IsValid() {
+		return nil
 	}
 	if _, err := database.sql.ExecContext(ctx, `UPDATE NODES SET moved_here=1 WHERE wc_id=? AND local_relpath=? AND op_depth=?`, database.wcID, destinationRelpath, relpathDepth(destinationRelpath)); err != nil {
 		return err
@@ -322,7 +331,8 @@ func (database *Database) Delete(ctx context.Context, targetPath string, options
 func (database *Database) checkDeleteSafe(ctx context.Context, targetPath string) error {
 	return database.Status(ctx, targetPath, StatusOptions{Depth: svn.DepthInfinity, NoIgnore: true}, func(status *Status) error {
 		unsafe := status.TextStatus == StatusModified || status.PropertyStatus == StatusModified || status.Conflicted ||
-			status.NodeStatus == StatusMissing || status.NodeStatus == StatusObstructed || status.NodeStatus == StatusUnversioned
+			status.NodeStatus == StatusAdded || status.NodeStatus == StatusReplaced || status.NodeStatus == StatusMissing ||
+			status.NodeStatus == StatusObstructed || status.NodeStatus == StatusUnversioned
 		if unsafe {
 			return fmt.Errorf("%w: %s has local modifications", svn.ErrClientModified, status.Path)
 		}
@@ -332,11 +342,22 @@ func (database *Database) checkDeleteSafe(ctx context.Context, targetPath string
 
 func (database *Database) insertDeleteLayer(ctx context.Context, relpath string) error {
 	opDepth := relpathDepth(relpath)
-	_, err := database.sql.ExecContext(ctx, `INSERT OR REPLACE INTO NODES
+	transaction, err := database.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND
+		(local_relpath=? OR local_relpath LIKE ? ESCAPE '#') AND op_depth>0`, database.wcID, relpath, descendantPattern(relpath)); err != nil {
+		return err
+	}
+	if _, err := transaction.ExecContext(ctx, `INSERT OR REPLACE INTO NODES
 		(wc_id, local_relpath, op_depth, parent_relpath, presence, kind)
 		SELECT wc_id, local_relpath, ?, parent_relpath, 'base-deleted', kind FROM NODES_BASE
-		WHERE wc_id=? AND (local_relpath=? OR local_relpath LIKE ? ESCAPE '#')`, opDepth, database.wcID, relpath, escapeLike(relpath)+"/%")
-	return err
+		WHERE wc_id=? AND (local_relpath=? OR local_relpath LIKE ? ESCAPE '#')`, opDepth, database.wcID, relpath, descendantPattern(relpath)); err != nil {
+		return err
+	}
+	return transaction.Commit()
 }
 
 func (database *Database) SetProperty(ctx context.Context, targetPath, name string, value []byte, force bool) error {
@@ -417,7 +438,12 @@ func (database *Database) Revert(ctx context.Context, targetPath string, options
 		if _, err := database.sql.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND local_relpath=? AND op_depth>0`, database.wcID, current); err != nil {
 			return err
 		}
-		if _, err := database.sql.ExecContext(ctx, `DELETE FROM ACTUAL_NODE WHERE wc_id=? AND local_relpath=?`, database.wcID, current); err != nil {
+		if _, err := database.sql.ExecContext(ctx, `UPDATE ACTUAL_NODE SET properties=NULL, conflict_old=NULL, conflict_new=NULL,
+			conflict_working=NULL, prop_reject=NULL, text_mod=NULL, tree_conflict_data=NULL, conflict_data=NULL,
+			older_checksum=NULL, left_checksum=NULL, right_checksum=NULL WHERE wc_id=? AND local_relpath=?`, database.wcID, current); err != nil {
+			return err
+		}
+		if _, err := database.sql.ExecContext(ctx, `DELETE FROM ACTUAL_NODE WHERE wc_id=? AND local_relpath=? AND changelist IS NULL`, database.wcID, current); err != nil {
 			return err
 		}
 	}

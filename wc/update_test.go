@@ -3,6 +3,7 @@ package wc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,6 +15,77 @@ import (
 	_ "github.com/otuschhoff/go-svn/ra/ralocal"
 	"github.com/otuschhoff/go-svn/svn"
 )
+
+func TestLargeCheckoutAndAlternatingUpdates(t *testing.T) {
+	svnadmin := requireTool(t, "svnadmin")
+	svnTool := requireTool(t, "svn")
+	ctx := context.Background()
+	root := t.TempDir()
+	repository := filepath.Join(root, "repository")
+	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
+		t.Fatalf("svnadmin create: %v\n%s", err, output)
+	}
+	seed := filepath.Join(root, "seed")
+	if err := os.Mkdir(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 1000; index++ {
+		name := filepath.Join(seed, fmt.Sprintf("file-%04d", index))
+		if err := os.WriteFile(name, fmt.Appendf(nil, "initial %d\n", index), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
+		t.Fatalf("svn import: %v\n%s", err, output)
+	}
+	session, _, err := ra.Open(ctx, repositoryURL+"/trunk", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	working := filepath.Join(root, "working")
+	database, err := Checkout(ctx, session, working, svn.InvalidRevnum, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if entries, err := os.ReadDir(working); err != nil || len(entries) != 1001 {
+		t.Fatalf("checkout entries = %d, error = %v", len(entries), err)
+	}
+	author := filepath.Join(root, "author")
+	if output, err := exec.Command(svnTool, "checkout", "-q", repositoryURL+"/trunk", author).CombinedOutput(); err != nil {
+		t.Fatalf("svn checkout author: %v\n%s", err, output)
+	}
+	for revision := 2; revision <= 21; revision++ {
+		name := fmt.Sprintf("file-%04d", revision-2)
+		want := fmt.Sprintf("revision %d\n", revision)
+		if err := os.WriteFile(filepath.Join(author, name), []byte(want), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if output, err := exec.Command(svnTool, "commit", "-q", "-m", fmt.Sprintf("revision %d", revision), author).CombinedOutput(); err != nil {
+			t.Fatalf("svn commit r%d: %v\n%s", revision, err, output)
+		}
+		if revision%2 == 0 {
+			if _, err := database.Update(ctx, session, working, svn.Revnum(revision), UpdateOptions{Depth: svn.DepthInfinity}); err != nil {
+				t.Fatalf("go-svn update r%d: %v", revision, err)
+			}
+		} else if output, err := exec.Command(svnTool, "update", "-q", "-r", fmt.Sprint(revision), working).CombinedOutput(); err != nil {
+			t.Fatalf("svn update r%d: %v\n%s", revision, err, output)
+		}
+		contents, err := os.ReadFile(filepath.Join(working, name))
+		if err != nil || string(contents) != want {
+			t.Fatalf("working %s at r%d = %q, error = %v", name, revision, contents, err)
+		}
+		info, err := database.Info(ctx, working)
+		if err != nil || info.Revision != svn.Revnum(revision) {
+			t.Fatalf("working root at r%d = %#v, error = %v", revision, info, err)
+		}
+		if output, err := exec.Command(svnTool, "status", "-q", working).CombinedOutput(); err != nil || len(output) != 0 {
+			t.Fatalf("svn status at r%d: %v\n%s", revision, err, output)
+		}
+	}
+}
 
 func TestCheckoutAndUpdateReferenceCompatible(t *testing.T) {
 	svnadmin := requireTool(t, "svnadmin")

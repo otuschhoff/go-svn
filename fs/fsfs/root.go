@@ -3,15 +3,18 @@ package fsfs
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	fsapi "github.com/otuschhoff/go-svn/fs"
 	"github.com/otuschhoff/go-svn/svn"
 )
 
 type Root struct {
-	filesystem *FS
-	revision   svn.Revnum
-	root       NodeRevision
+	filesystem       *FS
+	revision         svn.Revnum
+	root             NodeRevision
+	directoryCacheMu sync.RWMutex
+	directoryCache   map[ID]map[string]directoryEntry
 }
 
 func (filesystem *FS) RevisionRoot(ctx context.Context, revision svn.Revnum) (fsapi.Root, error) {
