@@ -29,6 +29,7 @@ type DockerServers struct {
 	Username string
 	Password string
 	close    func()
+	output   func() string
 	once     sync.Once
 }
 
@@ -78,12 +79,22 @@ func StartDockerServers(t testing.TB, repositoriesRoot string, options DockerOpt
 		down.Env = environment
 		_, _ = down.CombinedOutput()
 	}
+	serverOutput := func() string {
+		logs := exec.Command(docker, append(composeArgs, "logs", "--no-color")...)
+		logs.Env = environment
+		composeOutput, _ := logs.CombinedOutput()
+		errorLog := exec.Command(docker, append(composeArgs, "exec", "-T", "httpd", "cat", "/var/log/apache2/error.log")...)
+		errorLog.Env = environment
+		apacheOutput, _ := errorLog.CombinedOutput()
+		return string(composeOutput) + string(apacheOutput)
+	}
 	servers := &DockerServers{
 		SvnURL:   "svn://127.0.0.1:" + svnPort + "/",
 		HTTPURL:  "http://127.0.0.1:" + httpPort + "/svn/",
 		Username: options.Username,
 		Password: options.Password,
 		close:    closeServers,
+		output:   serverOutput,
 	}
 	t.Cleanup(servers.Close)
 
@@ -99,6 +110,13 @@ func StartDockerServers(t testing.TB, repositoriesRoot string, options DockerOpt
 		}
 	}
 	return servers
+}
+
+func (s *DockerServers) Output() string {
+	if s == nil || s.output == nil {
+		return ""
+	}
+	return s.output()
 }
 
 func (s *DockerServers) Close() {

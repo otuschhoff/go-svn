@@ -315,9 +315,15 @@ func (transport *transport) requestFile(ctx context.Context, method, rawURL, fil
 }
 
 func (transport *transport) requestBody(ctx context.Context, method, rawURL string, getBody func() (io.ReadCloser, error), length int64, headers http.Header) (*http.Response, error) {
-	body, err := getBody()
-	if err != nil {
-		return nil, err
+	body := io.ReadCloser(http.NoBody)
+	var err error
+	if length != 0 {
+		body, err = getBody()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		getBody = func() (io.ReadCloser, error) { return http.NoBody, nil }
 	}
 	request, err := http.NewRequestWithContext(ctx, method, rawURL, body)
 	if err != nil {

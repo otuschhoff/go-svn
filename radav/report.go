@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -327,10 +328,7 @@ func (session *Session) GetLocks(ctx context.Context, name string, depth svn.Dep
 		return nil, err
 	}
 	result := make(map[string]*svn.Lock, len(response.Locks))
-	requestedPath := "/" + strings.Trim(name, "/")
-	if requestedPath == "/" && name != "" {
-		requestedPath = "/" + name
-	}
+	requestedPath := "/" + strings.Trim(path.Join(session.sessionAnchor(), name), "/")
 	for _, value := range response.Locks {
 		lock := &svn.Lock{Path: value.Path, Token: value.Token, Owner: value.Owner, Comment: value.Comment, IsDAVComment: value.IsDAV}
 		if value.Created != "" {

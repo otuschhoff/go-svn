@@ -57,45 +57,52 @@ func TestProtocolWorkingCopyMatrices(t *testing.T) {
 		})
 	})
 	t.Run("dav", func(t *testing.T) {
+		root := t.TempDir()
+		seedProtocolDepthRepositoryAt(t, filepath.Join(root, "depth"))
+		seedProtocolCommitRepositoryAt(t, filepath.Join(root, "commit"))
+		seedProtocolSwitchRepositoryAt(t, filepath.Join(root, "switch"))
+		serverURL, username, password, closeServer := startProtocolDAV(t, root)
+		defer closeServer()
+		callbacks := protocolCallbacks(username, password)
 		t.Run("depth", func(t *testing.T) {
-			root := t.TempDir()
-			repository := filepath.Join(root, "repo")
-			seedProtocolDepthRepositoryAt(t, repository)
-			server := servers.StartHTTPD(t, root, servers.HTTPDOptions{Auth: servers.HTTPAuthBasic})
-			defer server.Close()
-			callbacks := protocolCallbacks(server.Username, server.Password)
 			open := func(t *testing.T) ra.Session {
-				return openProtocolSession(t, server.URL+"repo/trunk/", callbacks)
+				return openProtocolSession(t, serverURL+"depth/trunk", callbacks)
 			}
 			runCheckoutDepthMatrix(t, open)
 			runSetDepthMatrix(t, open)
 			runUpdateDepthMatrix(t, open)
 		})
 		t.Run("commit", func(t *testing.T) {
-			root := t.TempDir()
-			repository := filepath.Join(root, "repo")
-			seedProtocolCommitRepositoryAt(t, repository)
-			server := servers.StartHTTPD(t, root, servers.HTTPDOptions{Auth: servers.HTTPAuthBasic})
-			defer server.Close()
-			callbacks := protocolCallbacks(server.Username, server.Password)
-			session := openProtocolSession(t, server.URL+"repo/trunk/", callbacks)
+			session := openProtocolSession(t, serverURL+"commit/trunk", callbacks)
 			defer session.Close()
 			runCommitDepthMatrix(t, session, 1)
 		})
 		t.Run("switch", func(t *testing.T) {
-			root := t.TempDir()
-			repository := filepath.Join(root, "repo")
-			seedProtocolSwitchRepositoryAt(t, repository)
-			server := servers.StartHTTPD(t, root, servers.HTTPDOptions{Auth: servers.HTTPAuthBasic})
-			defer server.Close()
-			callbacks := protocolCallbacks(server.Username, server.Password)
-			open := func(t *testing.T) ra.Session { return openProtocolSession(t, server.URL+"repo/trunk/", callbacks) }
-			rootURL := strings.TrimSuffix(server.URL, "/") + "/repo"
+			open := func(t *testing.T) ra.Session { return openProtocolSession(t, serverURL+"switch/trunk", callbacks) }
+			rootURL := strings.TrimSuffix(serverURL, "/") + "/switch"
 			runSwitchDepthMatrix(t, rootURL, 3, open)
 			runSwitchSetDepthMatrix(t, rootURL, 3, open)
 			runSwitchedUpdateDepthMatrix(t, rootURL, 3, 4, open)
 		})
 	})
+}
+
+func startProtocolDAV(t *testing.T, repositoriesRoot string) (string, string, string, func()) {
+	t.Helper()
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOSVN_DOCKER"))) {
+	case "1", "true", "yes":
+		server := servers.StartDockerServers(t, repositoriesRoot, servers.DockerOptions{})
+		closeServer := func() {
+			if t.Failed() {
+				t.Logf("Docker integration server output:\n%s", server.Output())
+			}
+			server.Close()
+		}
+		return server.HTTPURL, server.Username, server.Password, closeServer
+	default:
+		server := servers.StartHTTPD(t, repositoriesRoot, servers.HTTPDOptions{Auth: servers.HTTPAuthBasic})
+		return server.URL, server.Username, server.Password, server.Close
+	}
 }
 
 func seedProtocolDepthRepositoryAt(t *testing.T, repository string) {

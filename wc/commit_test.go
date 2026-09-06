@@ -717,6 +717,10 @@ func runCommitDepthMatrix(t *testing.T, session ra.Session, revision svn.Revnum)
 			t.Fatal(err)
 		}
 		commitTarget(t, movedChild, CommitOptions{RevisionProperties: svn.Props{"svn:log": []byte("keep lock")}, Depth: svn.DepthEmpty, KeepLocks: true})
+		info, err := database.Info(ctx, movedChild)
+		if err != nil || info.Revision != revision {
+			t.Fatalf("post-commit info revision = %d, want %d, error = %v", info.Revision, revision, err)
+		}
 		current, err := session.GetLock(ctx, "moved/child")
 		if err != nil || current == nil || current.Token != lock.Token {
 			t.Fatalf("kept lock = %#v, error = %v", current, err)

@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,6 +64,15 @@ type multistatus struct {
 	Responses []propResponse `xml:"response"`
 }
 
+const propertyColonEscape = "__svn_colon__"
+
+var invalidQualifiedProperty = regexp.MustCompile(`(<\/?[A-Za-z_][A-Za-z0-9_.-]*:[A-Za-z_][A-Za-z0-9_.-]*):([A-Za-z_][A-Za-z0-9_.-]*)`)
+
+func decodeDAVXML(body []byte, target any) error {
+	body = invalidQualifiedProperty.ReplaceAll(body, []byte("${1}"+propertyColonEscape+"${2}"))
+	return xml.Unmarshal(body, target)
+}
+
 func (session *Session) propfind(ctx context.Context, rawURL, depth string) ([]propResponse, error) {
 	return session.propfindHeaders(ctx, rawURL, depth, nil)
 }
@@ -80,8 +91,12 @@ func (session *Session) propfindHeaders(ctx context.Context, rawURL, depth strin
 	if response.StatusCode != http.StatusMultiStatus {
 		return nil, responseError(response)
 	}
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
 	var result multistatus
-	if err := xml.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := decodeDAVXML(responseBody, &result); err != nil {
 		return nil, malformed("invalid multistatus: %v", err)
 	}
 	return result.Responses, nil
@@ -91,6 +106,10 @@ func (session *Session) revisionURL(ctx context.Context, revision svn.Revnum, na
 	if err := validateRelpath(name); err != nil {
 		return "", svn.InvalidRevnum, err
 	}
+	return session.repositoryRevisionURL(ctx, revision, path.Join(session.sessionAnchor(), name))
+}
+
+func (session *Session) repositoryRevisionURL(ctx context.Context, revision svn.Revnum, name string) (string, svn.Revnum, error) {
 	if !revision.IsValid() {
 		var err error
 		revision, err = session.LatestRevision(ctx)
@@ -276,7 +295,7 @@ func versionedProps(properties []property) (svn.Props, error) {
 		case nsSVNProp:
 			name = "svn:" + value.Name.Local
 		case nsCustom:
-			name = value.Name.Local
+			name = strings.ReplaceAll(value.Name.Local, propertyColonEscape, ":")
 		}
 		if name == "" {
 			continue

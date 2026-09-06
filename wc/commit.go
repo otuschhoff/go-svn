@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
@@ -120,6 +121,9 @@ func (database *Database) Commit(ctx context.Context, session ra.Session, target
 		return committed, err
 	}
 	if _, err := database.Update(ctx, session, targetPath, committed.Revision, UpdateOptions{Depth: options.Depth, Force: true, Accept: ConflictTheirs}); err != nil {
+		return committed, err
+	}
+	if err := database.finalizeCommittedMetadata(ctx, nodes, rootNode, committed); err != nil {
 		return committed, err
 	}
 	for _, node := range nodes {
@@ -381,6 +385,68 @@ func (database *Database) preparePostCommit(ctx context.Context, targetRelpath s
 	}
 	if rootNode != nil {
 		if _, err := transaction.ExecContext(ctx, `DELETE FROM ACTUAL_NODE WHERE wc_id=? AND local_relpath=?`, database.wcID, rootNode.info.RelativePath); err != nil {
+			return err
+		}
+	}
+	return transaction.Commit()
+}
+
+func (database *Database) finalizeCommittedMetadata(ctx context.Context, nodes map[string]*commitNode, rootNode *commitNode, committed *ra.CommitInfo) error {
+	checksums := make(map[string]svn.Checksum)
+	for _, node := range nodes {
+		if node.info.Kind != svn.NodeFile || node.status.NodeStatus == StatusDeleted || node.working == nil {
+			continue
+		}
+		temporary, err := os.CreateTemp("", "go-svn-committed-pristine-*")
+		if err != nil {
+			return err
+		}
+		name := temporary.Name()
+		if _, err = temporary.Write(node.working); err == nil {
+			err = temporary.Close()
+		} else {
+			_ = temporary.Close()
+		}
+		if err == nil {
+			sha1Checksum := svn.Sum(svn.ChecksumSHA1, node.working)
+			md5Checksum := svn.Sum(svn.ChecksumMD5, node.working)
+			err = database.installPristine(ctx, name, sha1Checksum, md5Checksum, int64(len(node.working)))
+			checksums[node.info.RelativePath] = sha1Checksum
+		}
+		_ = os.Remove(name)
+		if err != nil {
+			return err
+		}
+	}
+	transaction, err := database.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	var committedDate int64
+	if !committed.Date.IsZero() {
+		committedDate = committed.Date.UnixMicro()
+	}
+	update := func(relpath string) error {
+		_, err := transaction.ExecContext(ctx, `UPDATE NODES SET revision=?, changed_revision=?, changed_date=NULLIF(?, 0), changed_author=NULLIF(?, '') WHERE wc_id=? AND local_relpath=? AND op_depth=0`,
+			committed.Revision, committed.Revision, committedDate, committed.Author, database.wcID, relpath)
+		return err
+	}
+	for _, node := range nodes {
+		if node.status.NodeStatus != StatusDeleted {
+			if err := update(node.info.RelativePath); err != nil {
+				return err
+			}
+			if checksum, ok := checksums[node.info.RelativePath]; ok {
+				if _, err := transaction.ExecContext(ctx, `UPDATE NODES SET checksum=?, translated_size=NULL, last_mod_time=NULL WHERE wc_id=? AND local_relpath=? AND op_depth=0`,
+					checksum.Serialize(), database.wcID, node.info.RelativePath); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if rootNode != nil {
+		if err := update(rootNode.info.RelativePath); err != nil {
 			return err
 		}
 	}

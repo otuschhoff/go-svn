@@ -14,6 +14,18 @@ import (
 	"github.com/otuschhoff/go-svn/svn"
 )
 
+func TestDecodeDAVXMLWithColonInCustomProperty(t *testing.T) {
+	body := []byte(`<D:multistatus xmlns:D="DAV:" xmlns:C="http://subversion.tigris.org/xmlns/custom/"><D:response><D:propstat><D:prop><C:matrix:root>value</C:matrix:root></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>`)
+	var result multistatus
+	if err := decodeDAVXML(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	properties, err := versionedProps(result.Responses[0].Propstats[0].Properties.Values)
+	if err != nil || string(properties["matrix:root"]) != "value" {
+		t.Fatalf("properties = %#v, error = %v", properties, err)
+	}
+}
+
 func TestPropfindAndGetReads(t *testing.T) {
 	content := []byte("hello dav\n")
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

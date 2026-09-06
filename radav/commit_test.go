@@ -130,6 +130,9 @@ func TestHTTPv2CommitEditorRequestSequence(t *testing.T) {
 	if requests[3].header.Get("Content-Type") != "application/vnd.svn-svndiff" || !strings.HasPrefix(requests[3].body, "SVN\x02") {
 		t.Fatalf("PUT headers=%v body=%q", requests[3].header, requests[3].body)
 	}
+	if revision := requests[3].header.Get("X-SVN-Version-Name"); revision != "" {
+		t.Fatalf("added file base revision = %q", revision)
+	}
 }
 
 func TestHTTPv1CommitRejectedBeforeMutation(t *testing.T) {
@@ -266,6 +269,14 @@ func TestProppatchMultiStatusFailure(t *testing.T) {
 	}
 }
 
+func TestProppatchMalformedPropertyNameWithSuccessfulStatus(t *testing.T) {
+	body := `<D:multistatus xmlns:D="DAV:" xmlns:C="http://subversion.tigris.org/xmlns/custom/"><D:response><D:propstat><D:prop><C:matrix:root/></D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response></D:multistatus>`
+	response := &http.Response{StatusCode: http.StatusMultiStatus, Body: io.NopCloser(strings.NewReader(body))}
+	if err := checkProppatchResponse(response); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAtomicAndBinaryPropertyXML(t *testing.T) {
 	oldAbsent := map[string]*[]byte{"custom:prop": nil}
 	body, err := propertyUpdateXML(svn.Props{"custom:prop": []byte{0, 1, 2}}, oldAbsent)
@@ -291,10 +302,11 @@ func TestCommitLockTokenHeaders(t *testing.T) {
 	editor := &commitEditor{
 		session:    &Session{url: "https://example.test/repo"},
 		lockTokens: map[string]string{"dir/file": "opaquelocktoken:file", "dir/child/file": "opaquelocktoken:child"},
+		keepLocks:  true,
 		deleted:    make(map[string]bool),
 	}
 	headers := editor.mutationHeaders("dir/file", 7)
-	if headers.Get("X-SVN-Version-Name") != "7" || headers.Get("If") != `<https://example.test/repo/dir/file> (<opaquelocktoken:file>)` {
+	if headers.Get("X-SVN-Version-Name") != "7" || headers.Get("If") != `<https://example.test/repo/dir/file> (<opaquelocktoken:file>)` || headers.Get("X-SVN-Options") != "keep-locks" {
 		t.Fatalf("mutation headers=%v", headers)
 	}
 	recursive := editor.recursiveLockHeaders("dir")

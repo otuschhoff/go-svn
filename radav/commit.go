@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -183,8 +184,12 @@ func (editor *commitEditor) createTransaction(ctx context.Context) error {
 }
 
 func (editor *commitEditor) sessionAnchor() string {
-	repository, repositoryErr := url.Parse(editor.session.info.RepositoryRoot)
-	current, currentErr := url.Parse(editor.session.url)
+	return editor.session.sessionAnchor()
+}
+
+func (session *Session) sessionAnchor() string {
+	repository, repositoryErr := url.Parse(session.info.RepositoryRoot)
+	current, currentErr := url.Parse(session.url)
 	if repositoryErr != nil || currentErr != nil || repository.Scheme != current.Scheme || repository.Host != current.Host {
 		return ""
 	}
@@ -270,9 +275,6 @@ func (directory *commitDir) DeleteEntry(ctx context.Context, name string, revisi
 		return err
 	}
 	headers := directory.editor.mutationHeaders(name, revision)
-	if directory.editor.keepLocks && headers.Get("If") != "" {
-		headers.Set("X-SVN-Options", "keep-locks")
-	}
 	if err := directory.editor.expectEmpty(ctx, http.MethodDelete, directory.editor.nodeURL(name), nil, headers, http.StatusNoContent); err != nil {
 		return err
 	}
@@ -321,7 +323,7 @@ func (directory *commitDir) AddFile(ctx context.Context, name string, source *de
 	if err := directory.validateChild(name); err != nil {
 		return nil, err
 	}
-	file := &commitFile{editor: directory.editor, name: name, added: true, properties: make(svn.Props)}
+	file := &commitFile{editor: directory.editor, name: name, baseRevision: svn.InvalidRevnum, added: true, properties: make(svn.Props)}
 	if source != nil {
 		if err := directory.editor.copy(ctx, name, source, false); err != nil {
 			return nil, err
@@ -549,7 +551,7 @@ func (editor *commitEditor) copySourceURL(ctx context.Context, source *delta.Cop
 		return "", fmt.Errorf("%w: copy source is outside repository", svn.ErrRAIllegalURL)
 	}
 	name := strings.TrimPrefix(strings.TrimPrefix(candidate.Path, rootPath), "/")
-	resource, _, err := editor.session.revisionURL(ctx, source.Rev, name)
+	resource, _, err := editor.session.repositoryRevisionURL(ctx, source.Rev, name)
 	return resource, err
 }
 
@@ -560,6 +562,9 @@ func (editor *commitEditor) mutationHeaders(name string, revision svn.Revnum) ht
 	}
 	if token := editor.lockTokens[name]; token != "" && !editor.deleted[name] {
 		headers.Set("If", "<"+appendURLPath(editor.session.url, name)+"> (<"+token+">)")
+		if editor.keepLocks {
+			headers.Set("X-SVN-Options", "keep-locks")
+		}
 	}
 	return headers
 }
@@ -628,8 +633,15 @@ func checkProppatchResponse(response *http.Response) error {
 		return responseError(response)
 	}
 	var multistatus proppatchMultiStatus
-	if err := xml.NewDecoder(response.Body).Decode(&multistatus); err != nil {
-		return malformed("invalid PROPPATCH response: %v", err)
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	if err := decodeDAVXML(body, &multistatus); err != nil {
+		if valid, statusErr := malformedProppatchStatuses(body); valid {
+			return statusErr
+		}
+		return malformed("invalid PROPPATCH response: %v: %s", err, body)
 	}
 	for _, item := range multistatus.Responses {
 		statuses := []string{item.Status}
@@ -643,6 +655,29 @@ func checkProppatchResponse(response *http.Response) error {
 		}
 	}
 	return nil
+}
+
+func malformedProppatchStatuses(body []byte) (bool, error) {
+	remaining := string(body)
+	found := false
+	for {
+		start := strings.Index(remaining, ">HTTP/")
+		if start < 0 {
+			break
+		}
+		remaining = remaining[start+1:]
+		end := strings.IndexByte(remaining, '<')
+		if end < 0 {
+			return false, nil
+		}
+		status := strings.TrimSpace(remaining[:end])
+		found = true
+		if !davStatusSuccessful(status) {
+			return true, &svn.Error{Code: svn.ErrRADAVProppatchFailed, Message: "PROPPATCH failed: " + status}
+		}
+		remaining = remaining[end+1:]
+	}
+	return found, nil
 }
 
 func davStatusSuccessful(status string) bool {
