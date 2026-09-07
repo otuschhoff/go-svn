@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,11 +51,10 @@ func TestGoldenMismatch(t *testing.T) {
 }
 
 func TestFindToolOverride(t *testing.T) {
-	goName := "go"
-	if runtime.GOOS == "windows" {
-		goName += ".exe"
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
 	}
-	goPath := filepath.Join(runtime.GOROOT(), "bin", goName)
 	t.Setenv("GO_SVN_TEST_GO", goPath)
 
 	got, reason := FindTool("unused-name", "GO_SVN_TEST_GO")

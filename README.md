@@ -9,7 +9,7 @@ workflows before replacing the native Subversion client in production.
 
 ## Install
 
-Go 1.23 or newer is required.
+Go 1.26 or newer is required.
 
 ```sh
 go install github.com/otuschhoff/go-svn/cmd/gosvn@latest

@@ -191,7 +191,7 @@ Module path placeholder: `github.com/OWNER/go-svn` (replace on bootstrap).
 
 ```
 go-svn/
-├── go.mod                      # go 1.23+; see §9 for allowed deps
+├── go.mod                      # go 1.26+; see §9 for allowed deps
 ├── DESIGN.md
 ├── IMPLEMENTATION_PLAN.md
 ├── LICENSE                     # Apache-2.0
@@ -579,7 +579,7 @@ documents in §2 are authoritative where they differ.
 
 | Topic | Requirement |
 |-------|-------------|
-| Go version | `go 1.23` minimum (`iter`, `slices`, `maps`, range-over-func); CI also on latest stable. |
+| Go version | `go 1.26` minimum; CI also on latest stable. |
 | CGO | `CGO_ENABLED=0 go build ./... && CGO_ENABLED=0 go test ./...` is the default CI job. No `import "C"` anywhere. |
 | Context | All public functions take `context.Context` first; cancellation must abort network I/O (use `http.NewRequestWithContext`, `net.Dialer.DialContext`, `exec.CommandContext`) and long loops (check `ctx.Err()` per editor call via `delta.Cancel`). |
 | Errors | `*svn.Error` with numeric code; wrap with `%w`; never `panic` on untrusted input (fuzzed decoders must return errors). |
