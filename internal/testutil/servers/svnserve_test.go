@@ -2,6 +2,7 @@ package servers
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -25,6 +26,49 @@ func TestProcessEarlyExitCanBeStopped(t *testing.T) {
 }
 
 func TestProcessHelperExit(t *testing.T) {}
+
+func TestProcessStopDoesNotWaitForInheritedPipes(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GO_SVN_PROCESS_PARENT", "1")
+	serverProcess := startProcess(t, executable, "-test.run=^TestProcessHelperWithDescendant$")
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(serverProcess.output.String(), "descendant-started") {
+		if time.Now().After(deadline) {
+			t.Fatal("helper descendant did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	started := time.Now()
+	serverProcess.stop()
+	if elapsed := time.Since(started); elapsed > processWaitDelay+time.Second {
+		t.Fatalf("stop took %s", elapsed)
+	}
+}
+
+func TestProcessHelperWithDescendant(t *testing.T) {
+	if os.Getenv("GO_SVN_PROCESS_DESCENDANT") == "1" {
+		time.Sleep(3 * time.Second)
+		return
+	}
+	if os.Getenv("GO_SVN_PROCESS_PARENT") != "1" {
+		return
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(executable, "-test.run=^TestProcessHelperWithDescendant$")
+	command.Env = append(os.Environ(), "GO_SVN_PROCESS_DESCENDANT=1")
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	println("descendant-started")
+}
 
 func TestSvnserveOptionsDefaults(t *testing.T) {
 	var options SvnserveOptions

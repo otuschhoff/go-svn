@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const defaultStartupTimeout = 10 * time.Second
+const (
+	defaultStartupTimeout = 10 * time.Second
+	processWaitDelay      = time.Second
+)
 
 type process struct {
 	cancel context.CancelFunc
@@ -31,6 +34,7 @@ func startProcess(t testing.TB, executable string, args ...string) *process {
 	command := exec.CommandContext(ctx, executable, args...)
 	command.Stdout = output
 	command.Stderr = output
+	command.WaitDelay = processWaitDelay
 	if err := command.Start(); err != nil {
 		cancel()
 		t.Fatalf("start %s: %v", executable, err)
