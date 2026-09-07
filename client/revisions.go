@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -107,8 +108,7 @@ func (client *Client) resolveTarget(ctx context.Context, value string, options I
 	if peg.Kind == svn.RevisionUnspecified {
 		peg = parsedPeg
 	}
-	parsed, parseErr := url.Parse(targetValue)
-	if parseErr == nil && parsed.Scheme != "" {
+	if targetIsURL(targetValue, runtime.GOOS) {
 		session, corrected, err := ra.Open(ctx, targetValue, client.Callbacks)
 		if err != nil {
 			return nil, err
@@ -238,6 +238,17 @@ func (client *Client) Info(ctx context.Context, targetValue string, options Info
 		result.RepositoryUUID = target.workingInfo.RepositoryUUID
 	}
 	return result, nil
+}
+
+func targetIsURL(value, goos string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" {
+		return false
+	}
+	if goos == "windows" && len(value) >= 2 && value[1] == ':' && (value[0] >= 'A' && value[0] <= 'Z' || value[0] >= 'a' && value[0] <= 'z') {
+		return false
+	}
+	return true
 }
 
 func joinRepositoryURL(root, repositoryPath string) string {

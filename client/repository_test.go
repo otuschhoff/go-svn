@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -156,7 +157,7 @@ func TestRepositoryReadAndMutationSequence(t *testing.T) {
 		t.Fatalf("ignored export stat error=%v", err)
 	}
 	properties, err = instance.PropList(ctx, rootURL+"/imported/nested/script.sh", client.PropertyOptions{InfoOptions: client.InfoOptions{Revision: svn.Revision{Kind: svn.RevisionNumber, Number: 6}}})
-	if err != nil || string(properties["custom:script"]) != "yes" || len(properties["svn:executable"]) == 0 {
+	if err != nil || string(properties["custom:script"]) != "yes" || runtime.GOOS != "windows" && len(properties["svn:executable"]) == 0 {
 		t.Fatalf("imported properties=%v error=%v", properties, err)
 	}
 
@@ -341,7 +342,7 @@ func TestImportMergesDirectoriesWithoutOverwritingFiles(t *testing.T) {
 		t.Fatalf("single import info=%#v error=%v", info, err)
 	}
 	properties, err := instance.PropList(ctx, rootURL+"/nested/script.sh", client.PropertyOptions{})
-	if err != nil || string(properties["custom:script"]) != "yes" || len(properties["svn:executable"]) == 0 {
+	if err != nil || string(properties["custom:script"]) != "yes" || runtime.GOOS != "windows" && len(properties["svn:executable"]) == 0 {
 		t.Fatalf("single import properties=%v error=%v", properties, err)
 	}
 	info, err = instance.Mucc(ctx, rootURL, []client.Action{

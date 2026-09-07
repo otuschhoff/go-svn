@@ -3,6 +3,8 @@ package client_test
 import (
 	"context"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/otuschhoff/go-svn/client"
@@ -59,6 +61,17 @@ func TestInfoResolvesURLAndWorkingCopyRevisions(t *testing.T) {
 	}
 	if wcInfo.WorkingCopy == nil || wcInfo.URL != rootURL || wcInfo.Revision != 1 || wcInfo.RepositoryUUID != urlInfo.RepositoryUUID {
 		t.Fatalf("working-copy info = %#v", wcInfo)
+	}
+}
+
+func TestInfoTreatsWindowsDrivePathAsWorkingCopy(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("requires Windows path semantics")
+	}
+	instance := client.New(nil)
+	_, err := instance.Info(context.Background(), `C:\working\file`, client.InfoOptions{})
+	if err != nil && strings.Contains(err.Error(), `scheme "c"`) {
+		t.Fatalf("Windows path was treated as a repository URL: %v", err)
 	}
 }
 
