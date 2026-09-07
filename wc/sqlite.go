@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/otuschhoff/go-svn/svn"
@@ -53,7 +55,7 @@ func OpenDatabase(ctx context.Context, databasePath string, options Options) (*D
 	if options.Writable {
 		mode = "rw"
 	}
-	dsn := (&url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=" + mode}).String()
+	dsn := sqliteDSN(absolute, mode)
 	handle, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open working copy database: %w", err)
@@ -66,6 +68,23 @@ func OpenDatabase(ctx context.Context, databasePath string, options Options) (*D
 		return nil, err
 	}
 	return database, nil
+}
+
+func sqliteDSN(name, mode string) string {
+	return sqliteDSNForOS(name, mode, runtime.GOOS)
+}
+
+func sqliteDSNForOS(name, mode, goos string) string {
+	path := name
+	if goos == "windows" {
+		path = strings.ReplaceAll(path, `\`, "/")
+	} else {
+		path = filepath.ToSlash(path)
+	}
+	if len(path) >= 2 && path[1] == ':' && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path, RawQuery: "mode=" + mode}).String()
 }
 
 func (database *Database) initialize(ctx context.Context, options Options) error {

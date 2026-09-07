@@ -117,7 +117,10 @@ func (transaction *Transaction) Abort(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return transaction.withLock(ctx, transaction.remove)
+	if err := transaction.withLock(ctx, transaction.removeData); err != nil {
+		return err
+	}
+	return removeIfExists(transaction.protorevPath() + "-lock")
 }
 
 func (transaction *Transaction) create(ctx context.Context) error {
@@ -156,13 +159,28 @@ func (transaction *Transaction) withLock(ctx context.Context, action func() erro
 }
 
 func (transaction *Transaction) remove() error {
+	if err := transaction.removeData(); err != nil {
+		return err
+	}
+	return removeIfExists(transaction.protorevPath() + "-lock")
+}
+
+func (transaction *Transaction) removeData() error {
 	var result error
-	for _, name := range []string{transaction.directory(), transaction.protorevPath(), transaction.protorevPath() + "-lock"} {
+	for _, name := range []string{transaction.directory(), transaction.protorevPath()} {
 		if err := os.RemoveAll(name); err != nil && !errors.Is(err, os.ErrNotExist) && result == nil {
 			result = err
 		}
 	}
 	return result
+}
+
+func removeIfExists(name string) error {
+	err := os.Remove(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func (transaction *Transaction) directory() string {

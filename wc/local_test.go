@@ -3,7 +3,6 @@ package wc
 import (
 	"context"
 	"errors"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -55,7 +54,7 @@ func TestLocalOperationsReferenceCompatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "delete-added", "base"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}

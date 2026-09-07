@@ -18,7 +18,7 @@ func TestInfoResolvesURLAndWorkingCopyRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	editor, err := repository.GetCommitEditor(ctx, repos.CommitOptions{
 		RepositoryURL: rootURL,
 		Properties:    svn.Props{"svn:author": []byte("alice"), "svn:log": []byte("seed")},
@@ -68,7 +68,7 @@ func TestInfoTracesImplicitPegAcrossMove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	revprops := func(message string) svn.Props { return svn.Props{"svn:log": []byte(message)} }
 	if _, err := instance.Mucc(ctx, rootURL, []client.Action{

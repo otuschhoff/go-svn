@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -197,7 +196,7 @@ func TestCommitDepthMatrixLocal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -779,7 +778,7 @@ func TestCommitWorkingCopyRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "directory", "child"), []byte("child\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -1069,7 +1068,7 @@ func TestCommitChangelistFiltering(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}

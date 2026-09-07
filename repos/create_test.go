@@ -28,7 +28,7 @@ func TestCreateReferenceCompatibility(t *testing.T) {
 				t.Fatalf("svnadmin verify: %v\n%s", err, output)
 			}
 			checkoutPath := filepath.Join(t.TempDir(), "checkout")
-			if output, err := exec.Command(svn, "checkout", "--non-interactive", "file://"+repositoryPath, checkoutPath).CombinedOutput(); err != nil {
+			if output, err := exec.Command(svn, "checkout", "--non-interactive", repository.URL(), checkoutPath).CombinedOutput(); err != nil {
 				t.Fatalf("svn checkout: %v\n%s", err, output)
 			}
 		})

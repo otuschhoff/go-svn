@@ -19,7 +19,7 @@ func TestWorkingCopyMergeinfoInheritanceAndElision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"}, {Kind: client.ActionMkdir, Path: "trunk/child"},

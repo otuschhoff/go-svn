@@ -3,7 +3,6 @@ package client_test
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 
@@ -25,7 +24,7 @@ func ExampleClient_Checkout() {
 	if err != nil {
 		return
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository.Path()}).String()
+	repositoryURL := repository.URL()
 	svnClient := client.New(nil)
 	_, err = svnClient.Mucc(ctx, repositoryURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"},

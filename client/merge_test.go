@@ -21,7 +21,7 @@ func TestMergeRangeAppliesChangesAndRecordsMergeinfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "target"},
@@ -73,7 +73,7 @@ func TestMergeRecordsAndResolvesTextConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "target"},
@@ -125,7 +125,7 @@ func TestMergeRecordOnlyDryRunAndReverse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "record"}, {Kind: client.ActionMkdir, Path: "dry"}, {Kind: client.ActionMkdir, Path: "reverse"},
@@ -181,7 +181,7 @@ func TestMergeTwoSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "left"}, {Kind: client.ActionMkdir, Path: "right"}, {Kind: client.ActionMkdir, Path: "target"},
@@ -224,7 +224,7 @@ func TestMergeEmitsNotifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "target"}, {Kind: client.ActionPut, Path: "source/file", Content: []byte("one\n")}, {Kind: client.ActionPut, Path: "target/file", Content: []byte("one\n")}}, client.MuccOptions{RevisionProperties: svn.Props{"svn:log": []byte("seed")}})
 	if err != nil {
@@ -254,7 +254,7 @@ func TestAutomaticMergeUsesCommonHistoryAndEligibleRevisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"},
@@ -290,7 +290,7 @@ func TestMergeRecordsPropertyConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "target"},
@@ -329,7 +329,7 @@ func TestMergeRecordsTreeConflictForIncomingDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "source"}, {Kind: client.ActionMkdir, Path: "target"},

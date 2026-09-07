@@ -13,7 +13,7 @@ func DirentCanonicalize(value string) string {
 		if isDrive(value) {
 			value = strings.ToUpper(value[:1]) + value[1:]
 		}
-		if strings.HasPrefix(value, "//") {
+		if isUNC(value) {
 			parts := strings.FieldsFunc(value[2:], func(r rune) bool { return r == '/' })
 			if len(parts) >= 2 {
 				parts[0] = strings.ToLower(parts[0])
@@ -42,7 +42,7 @@ func DirentIsCanonical(value string) bool { return value == DirentCanonicalize(v
 
 func DirentIsAbsolute(value string) bool {
 	if runtime.GOOS == "windows" {
-		return (isDrive(value) && len(value) >= 3 && value[0] >= 'A' && value[0] <= 'Z' && value[2] == '/') || isUNC(value)
+		return strings.HasPrefix(value, "/") || (isDrive(value) && len(value) >= 3 && value[0] >= 'A' && value[0] <= 'Z' && value[2] == '/')
 	}
 	return strings.HasPrefix(value, "/")
 }
@@ -229,5 +229,5 @@ func isUNC(value string) bool {
 		return false
 	}
 	parts := strings.Split(value[2:], "/")
-	return len(parts) >= 2 && parts[0] != "" && parts[1] != ""
+	return len(parts) >= 2 && parts[0] != "" && parts[0] != "." && parts[0] != ".." && parts[1] != "" && parts[1] != "." && parts[1] != ".."
 }

@@ -3,7 +3,6 @@ package ra_test
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 
 	"github.com/otuschhoff/go-svn/ra"
@@ -22,7 +21,7 @@ func ExampleOpen() {
 	if err != nil {
 		return
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository.Path()}).String()
+	repositoryURL := repository.URL()
 	session, _, err := ra.Open(ctx, repositoryURL, nil)
 	if err != nil {
 		return

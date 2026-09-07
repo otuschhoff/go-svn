@@ -154,7 +154,7 @@ func TestCLIReadAndWorkingCopyMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	if _, err := instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"},
@@ -242,7 +242,7 @@ func TestCLIURLMutationMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	if got := runCLI(t, "mkdir", "--parents", "-m", "mkdir", rootURL+"/trunk/source"); !strings.Contains(got, "Committed revision 1.") {
 		t.Fatalf("mkdir=%q", got)
 	}

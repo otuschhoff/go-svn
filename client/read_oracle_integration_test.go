@@ -26,7 +26,7 @@ func TestReadAndExportMatchReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	svnTool := testutil.RequireTool(t, "svn", "GOSVN_SVN")
 	svnmucc := testutil.RequireTool(t, "svnmucc", "GOSVN_SVNMUCC")

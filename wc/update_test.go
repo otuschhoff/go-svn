@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -356,7 +355,7 @@ func TestLocalDepthMatrices(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -585,7 +584,7 @@ func TestLocalSwitchDepthMatrix(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(base, "dir", "child"), []byte("trunk child\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL).CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -829,7 +828,7 @@ func TestLargeCheckoutAndAlternatingUpdates(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -899,7 +898,7 @@ func TestCheckoutAndUpdateReferenceCompatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(importPath, "dir", "nested"), []byte("nested\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "initial", importPath, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -991,7 +990,7 @@ func TestSwitchPersistsRepositoryPath(t *testing.T) {
 	if output, err := exec.Command(svnadmin, "create", repository).CombinedOutput(); err != nil {
 		t.Fatalf("svnadmin create: %v\n%s", err, output)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	for _, branch := range []string{"trunk", "branch"} {
 		seed := filepath.Join(root, branch)
 		if err := os.Mkdir(seed, 0o755); err != nil {
@@ -1042,7 +1041,7 @@ func TestUpdatePropertyConflictReferenceCompatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "file"), []byte("content\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -1111,7 +1110,7 @@ func TestUpdateTreeConflictReferenceCompatible(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "file"), []byte("base\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -1199,7 +1198,7 @@ func TestUpdateIncomingDeletePreservesLocalEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "clean-directory", "child"), []byte("clean child\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -1450,7 +1449,7 @@ func TestUpdateEditorUsesLocalCopySource(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(seed, "source-directory", "child"), childContents, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -1535,7 +1534,7 @@ func TestCheckoutRecordsExternalDefinitions(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(seed, "lib"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL).CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}

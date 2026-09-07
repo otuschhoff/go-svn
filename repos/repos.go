@@ -15,6 +15,7 @@ import (
 	"github.com/otuschhoff/go-svn/mergeinfo"
 	"github.com/otuschhoff/go-svn/ra"
 	"github.com/otuschhoff/go-svn/svn"
+	svnpath "github.com/otuschhoff/go-svn/svn/path"
 )
 
 type Repository struct {
@@ -45,6 +46,14 @@ func Open(ctx context.Context, repositoryPath string) (*Repository, error) {
 }
 
 func (repository *Repository) Path() string { return repository.path }
+
+func (repository *Repository) URL() string {
+	value, err := svnpath.DirentToFileURL(repository.path)
+	if err != nil {
+		return ""
+	}
+	return value
+}
 
 func (repository *Repository) UUID(ctx context.Context) (string, error) {
 	return repository.fs.UUID(ctx)

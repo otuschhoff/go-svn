@@ -33,6 +33,17 @@ func TestReadWrite(t *testing.T) {
 	}
 }
 
+func TestReadCRLFRecords(t *testing.T) {
+	fixture := "K 3\r\nkey\r\nV 5\r\nvalue\r\nEND\r\n"
+	properties, err := Read(strings.NewReader(fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(properties["key"]); got != "value" {
+		t.Fatalf("value = %q", got)
+	}
+}
+
 func TestReadSVNAdminRevpropsFixture(t *testing.T) {
 	data, err := os.ReadFile("testdata/revprops-0")
 	if err != nil {

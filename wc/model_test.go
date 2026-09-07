@@ -268,7 +268,7 @@ func TestReferenceWorkingTopologies(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCommand(t, svnadmin, "create", repositoryPath)
-	rootURL := "file://" + repositoryPath
+	rootURL := fileURL(t, repositoryPath)
 	runCommand(t, svnmucc, "-U", rootURL,
 		"mkdir", "trunk", "mkdir", "trunk/dir", "put", contentPath, "trunk/dir/file.txt",
 		"mkdir", "branch", "mkdir", "branch/dir", "put", contentPath, "branch/dir/file.txt",
@@ -481,7 +481,7 @@ func TestReferenceConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	runCommand(t, svnadmin, "create", repositoryPath)
-	rootURL := "file://" + repositoryPath
+	rootURL := fileURL(t, repositoryPath)
 	runCommand(t, svnmucc, "-U", rootURL, "mkdir", "trunk", "put", basePath, "trunk/file", "propset", "shared", "base", "trunk/file", "mkdir", "trunk/tree", "put", basePath, "trunk/tree/child", "-m", "seed")
 	runCommand(t, svnTool, "checkout", "--quiet", rootURL+"/trunk", workingPath)
 	if err := os.WriteFile(filepath.Join(workingPath, "file"), []byte("local\n"), 0o666); err != nil {

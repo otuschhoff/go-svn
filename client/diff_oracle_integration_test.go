@@ -24,7 +24,7 @@ func TestDiffMatchesReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	revprops := func(message string) svn.Props { return svn.Props{"svn:log": []byte(message)} }
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
@@ -122,7 +122,7 @@ func TestWorkingCopyDiffMatchesReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"},

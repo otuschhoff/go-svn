@@ -2,12 +2,12 @@ package hashfile
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/otuschhoff/go-svn/svn"
 )
@@ -92,17 +92,19 @@ func readRecord(reader *bufio.Reader) (byte, []byte, error) {
 		}
 		return 0, nil, svn.Wrap(svn.ErrMalformedFile, "read hash record header", err)
 	}
-	if string(header) == "END\n" {
+	header = bytes.TrimSuffix(header, []byte{'\n'})
+	header = bytes.TrimSuffix(header, []byte{'\r'})
+	if string(header) == "END" {
 		return 'E', nil, nil
 	}
-	if len(header) < 4 || header[1] != ' ' {
-		return 0, nil, malformed("invalid record header %q", strings.TrimSuffix(string(header), "\n"))
+	if len(header) < 3 || header[1] != ' ' {
+		return 0, nil, malformed("invalid record header %q", header)
 	}
 	kind := header[0]
 	if kind != 'K' && kind != 'V' && kind != 'D' {
 		return 0, nil, malformed("invalid record type %q", kind)
 	}
-	lengthText := string(header[2 : len(header)-1])
+	lengthText := string(header[2:])
 	if lengthText == "" || lengthText[0] == '+' || lengthText[0] == '-' {
 		return 0, nil, malformed("invalid record length %q", lengthText)
 	}
@@ -117,6 +119,12 @@ func readRecord(reader *bufio.Reader) (byte, []byte, error) {
 	terminator, err := reader.ReadByte()
 	if err != nil {
 		return 0, nil, svn.Wrap(svn.ErrIncompleteData, "hash record terminator is missing", err)
+	}
+	if terminator == '\r' {
+		terminator, err = reader.ReadByte()
+		if err != nil {
+			return 0, nil, svn.Wrap(svn.ErrIncompleteData, "hash record terminator is missing", err)
+		}
 	}
 	if terminator != '\n' {
 		return 0, nil, malformed("hash record is not newline terminated")

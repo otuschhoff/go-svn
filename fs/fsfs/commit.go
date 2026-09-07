@@ -146,8 +146,11 @@ func (transaction *Transaction) Commit(ctx context.Context, lockTokens map[strin
 				}
 			}
 		}
-		return transaction.remove()
+		return transaction.removeData()
 	})
+	if err == nil {
+		err = removeIfExists(transaction.protorevPath() + "-lock")
+	}
 	return committed, err
 }
 

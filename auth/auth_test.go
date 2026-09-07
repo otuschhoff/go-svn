@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestDiskProviderRoundTrip(t *testing.T) {
 			t.Fatalf("credentials = %#v, want %#v", got, want)
 		}
 		info, err := os.Stat(filepath.Join(directory, string(want.Kind), CacheKey(want.Realm)))
-		if err != nil || info.Mode().Perm() != 0o600 {
+		if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 			t.Fatalf("cache mode = %v, error %v", info.Mode().Perm(), err)
 		}
 	}

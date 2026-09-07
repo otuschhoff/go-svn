@@ -24,7 +24,7 @@ func TestCopyURLPinsExternals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	revprops := svn.Props{"svn:log": []byte("test")}
 	if _, err := instance.MkdirURL(ctx, rootURL, []string{"trunk/source/nested", "trunk/external"}, true, revprops); err != nil {
@@ -65,7 +65,7 @@ func TestRepositoryReadAndMutationSequence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	var notifications []notify.Notify
 	instance := client.New(&ra.Callbacks{Notify: func(event notify.Notify) { notifications = append(notifications, event) }})
 	revprops := func(message string) svn.Props {
@@ -309,7 +309,7 @@ func TestImportMergesDirectoriesWithoutOverwritingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	revprops := func(message string) svn.Props { return svn.Props{"svn:log": []byte(message)} }
 	if _, err := instance.MkdirURL(ctx, rootURL, []string{"existing"}, false, revprops("mkdir")); err != nil {

@@ -50,7 +50,7 @@ func Create(ctx context.Context, rootPath string, options CreateOptions) (*Datab
 		}
 	}
 	databasePath := filepath.Join(adminPath, "wc.db")
-	dsn := (&url.URL{Scheme: "file", Path: databasePath, RawQuery: "mode=rwc"}).String()
+	dsn := sqliteDSN(databasePath, "rwc")
 	handle, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

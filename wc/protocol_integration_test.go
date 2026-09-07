@@ -124,7 +124,7 @@ func seedProtocolDepthRepositoryAt(t *testing.T, repository string) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -176,7 +176,7 @@ func seedProtocolCommitRepositoryAt(t *testing.T, repository string) {
 			t.Fatal(err)
 		}
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL+"/trunk").CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}
@@ -207,7 +207,7 @@ func seedProtocolSwitchRepositoryAt(t *testing.T, repository string) {
 	if err := os.WriteFile(filepath.Join(base, "dir", "child"), []byte("trunk child\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	repositoryURL := (&url.URL{Scheme: "file", Path: repository}).String()
+	repositoryURL := fileURL(t, repository)
 	if output, err := exec.Command(svnTool, "import", "-q", "-m", "seed", seed, repositoryURL).CombinedOutput(); err != nil {
 		t.Fatalf("svn import: %v\n%s", err, output)
 	}

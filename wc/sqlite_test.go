@@ -59,6 +59,13 @@ func TestFormat32StatusWithoutPristineFile(t *testing.T) {
 	}
 }
 
+func TestSQLiteDSNForWindowsDrive(t *testing.T) {
+	got := sqliteDSNForOS(`C:\Users\runner\working\.svn\wc.db`, "rwc", "windows")
+	if got != "file:///C:/Users/runner/working/.svn/wc.db?mode=rwc" {
+		t.Fatalf("DSN = %q", got)
+	}
+}
+
 func TestOpenDatabaseFormat(t *testing.T) {
 	for _, test := range []struct {
 		format int
@@ -127,7 +134,7 @@ func TestOpenReferenceWorkingCopy(t *testing.T) {
 	if output, err := exec.Command(svnadmin, "create", repositoryPath).CombinedOutput(); err != nil {
 		t.Fatalf("svnadmin create: %v\n%s", err, output)
 	}
-	if output, err := exec.Command(svn, "checkout", "--quiet", "file://"+repositoryPath, workingPath).CombinedOutput(); err != nil {
+	if output, err := exec.Command(svn, "checkout", "--quiet", fileURL(t, repositoryPath), workingPath).CombinedOutput(); err != nil {
 		t.Fatalf("svn checkout: %v\n%s", err, output)
 	}
 	database, err := OpenDatabase(context.Background(), filepath.Join(workingPath, ".svn", "wc.db"), Options{})

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,6 +15,9 @@ import (
 )
 
 func TestCommitHooks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX hook fixture is not executable on Windows")
+	}
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("POSIX shell is not installed")
 	}
@@ -69,7 +73,7 @@ func TestCommitHooks(t *testing.T) {
 
 func commitHookFile(repository *Repository, callback func(*ra.CommitInfo) error) error {
 	ctx := context.Background()
-	editor, err := repository.GetCommitEditor(ctx, CommitOptions{RepositoryURL: "file://" + repository.Path(), Properties: svn.Props{"svn:author": []byte("author"), "svn:log": []byte("hook test")}, Callback: callback})
+	editor, err := repository.GetCommitEditor(ctx, CommitOptions{RepositoryURL: repository.URL(), Properties: svn.Props{"svn:author": []byte("author"), "svn:log": []byte("hook test")}, Callback: callback})
 	if err != nil {
 		return err
 	}

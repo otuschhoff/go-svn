@@ -88,7 +88,11 @@ func findRepository(start string) (string, string, error) {
 }
 
 func fileURL(localPath string) string {
-	return (&url.URL{Scheme: "file", Path: filepath.ToSlash(localPath)}).String()
+	path := filepath.ToSlash(localPath)
+	if len(path) >= 2 && path[1] == ':' && !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 func (session *Session) URL() string { return session.url }

@@ -19,7 +19,7 @@ func TestCheckoutProcessesDirectoryExternals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"},
@@ -78,7 +78,7 @@ func TestExportProcessesAndIgnoresExternals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"}, {Kind: client.ActionMkdir, Path: "library"},
@@ -113,7 +113,7 @@ func TestCommitIncludesDirectoryExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootURL := "file://" + repository.Path()
+	rootURL := repository.URL()
 	instance := client.New(nil)
 	_, err = instance.Mucc(ctx, rootURL, []client.Action{
 		{Kind: client.ActionMkdir, Path: "trunk"}, {Kind: client.ActionMkdir, Path: "library"},
