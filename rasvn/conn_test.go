@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -198,6 +199,29 @@ func TestHandshakeCancellationInterruptsRead(t *testing.T) {
 	_, err := conn.handshake(ctx, "svn://host/repo")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("handshake error = %v", err)
+	}
+}
+
+func TestCanceledReadsDoNotLeakGoroutines(t *testing.T) {
+	baseline := runtime.NumGoroutine()
+	for range 20 {
+		clientStream, serverStream := net.Pipe()
+		conn := newConnection(clientStream, &ra.Callbacks{}, "", "", false)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		_, err := conn.handshake(ctx, "svn://host/repo")
+		cancel()
+		clientStream.Close()
+		serverStream.Close()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("handshake error = %v", err)
+		}
+	}
+	deadline := time.Now().Add(time.Second)
+	for runtime.NumGoroutine() > baseline+2 && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if current := runtime.NumGoroutine(); current > baseline+2 {
+		t.Fatalf("goroutines grew from %d to %d", baseline, current)
 	}
 }
 

@@ -124,3 +124,27 @@ func createTestWorkingCopy(t *testing.T) *Database {
 	}
 	return database
 }
+
+func TestResolveWorkPathRejectsSymlinkAncestor(t *testing.T) {
+	database := createTestWorkingCopy(t)
+	defer database.Close()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "victim"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(database.RootPath(), "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := database.resolveWorkPath("link/victim"); err == nil {
+		t.Fatal("symlink ancestor accepted")
+	}
+	if _, err := database.Enqueue(context.Background(), DirectoryRemoveWork("link/victim", true)); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.RunWorkQueue(context.Background()); err == nil {
+		t.Fatal("unsafe work item succeeded")
+	}
+	if contents, err := os.ReadFile(filepath.Join(outside, "victim")); err != nil || string(contents) != "outside" {
+		t.Fatalf("outside file=%q error=%v", contents, err)
+	}
+}

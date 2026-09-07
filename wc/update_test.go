@@ -3,6 +3,7 @@ package wc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -72,6 +73,126 @@ func TestInMemorySparseCheckoutAndUpdate(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(working, "dir")); !os.IsNotExist(err) {
 		t.Fatalf("updated depth-files directory exists, error = %v", err)
 	}
+}
+
+type failingReporterSession struct{ ra.Session }
+
+func (failingReporterSession) DoUpdate(context.Context, svn.Revnum, string, svn.Depth, bool, bool, delta.Editor) (ra.Reporter, error) {
+	return nil, errors.New("reporter setup failed")
+}
+
+func (failingReporterSession) DoSwitch(context.Context, svn.Revnum, string, svn.Depth, string, bool, bool, delta.Editor) (ra.Reporter, error) {
+	return nil, errors.New("reporter setup failed")
+}
+
+func TestReporterSetupFailureRollsBackTransaction(t *testing.T) {
+	ctx := context.Background()
+	repository := inmem.NewRepository("memory://reporter-failure", "uuid")
+	repository.AddRevision(inmem.Revision{Root: inmem.Directory(map[string]*inmem.Node{"trunk": inmem.Directory(nil)})})
+	session, err := repository.Open("memory://reporter-failure/trunk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	for _, operation := range []struct {
+		name string
+		run  func(*Database, ra.Session, string) error
+	}{
+		{"update", func(database *Database, session ra.Session, working string) error {
+			_, err := database.Update(ctx, session, working, 1, UpdateOptions{Depth: svn.DepthInfinity})
+			return err
+		}},
+		{"switch", func(database *Database, session ra.Session, working string) error {
+			_, err := database.Switch(ctx, session, working, "memory://reporter-failure/trunk", 1, UpdateOptions{Depth: svn.DepthInfinity})
+			return err
+		}},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			working := filepath.Join(t.TempDir(), "working")
+			database, err := Create(ctx, working, CreateOptions{RepositoryRoot: "memory://reporter-failure", RepositoryUUID: "uuid", RepositoryPath: "trunk", Revision: 0, Depth: svn.DepthInfinity})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			if err := operation.run(database, failingReporterSession{session}, working); err == nil {
+				t.Fatal("reporter setup failure was ignored")
+			}
+			if _, err := database.sql.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+				t.Fatalf("transaction remained open: %v", err)
+			}
+			if _, err := database.sql.ExecContext(ctx, "ROLLBACK"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestUpdateEditorRejectsPathTraversal(t *testing.T) {
+	ctx := context.Background()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Create(ctx, working, CreateOptions{RepositoryRoot: "memory://repository", RepositoryUUID: "uuid", RepositoryPath: "trunk", Revision: 1, Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	editor, err := NewUpdateEditor(ctx, database, working, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := editor.OpenRoot(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(filepath.Dir(working), "outside")
+	for _, name := range []string{"../outside", "dir/../../outside", "/absolute", `dir\outside`} {
+		if _, err := root.AddFile(ctx, name, nil); err == nil {
+			t.Errorf("AddFile(%q) accepted", name)
+		}
+		if err := root.DeleteEntry(ctx, name, 1); err == nil {
+			t.Errorf("DeleteEntry(%q) accepted", name)
+		}
+	}
+	if _, err := os.Lstat(outside); !os.IsNotExist(err) {
+		t.Fatalf("outside path touched: %v", err)
+	}
+}
+
+func TestUpdateEditorRejectsBadResultChecksum(t *testing.T) {
+	ctx := context.Background()
+	working := filepath.Join(t.TempDir(), "working")
+	database, err := Create(ctx, working, CreateOptions{RepositoryRoot: "memory://repository", RepositoryUUID: "uuid", RepositoryPath: "trunk", Revision: 0, Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	editor, err := NewUpdateEditor(ctx, database, working, UpdateOptions{Depth: svn.DepthInfinity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := editor.OpenRoot(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := root.AddFile(ctx, "file", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := file.ApplyTextDelta(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := []byte("server data\n")
+	if err := handler.Window(&delta.Window{TargetLength: len(contents), Ops: []delta.Op{{Kind: delta.OpNew, Length: len(contents)}}, NewData: contents}); err != nil {
+		t.Fatal(err)
+	}
+	if err := handler.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wrong := svn.Sum(svn.ChecksumMD5, []byte("wrong"))
+	if err := file.Close(ctx, &wrong); !errors.Is(err, svn.ErrChecksumMismatch) {
+		t.Fatalf("close error = %v", err)
+	}
+	_ = editor.AbortEdit(ctx)
 }
 
 func TestInMemoryCheckoutAndSetDepthMatrices(t *testing.T) {

@@ -1,0 +1,14 @@
+./config FuzzParse
+./delta FuzzDecoder
+./delta FuzzTxDeltaRoundTrip
+./fs/fsfs FuzzLowLevelParsers
+./internal/lz4 FuzzDecodeBlock
+./mergeinfo FuzzParse
+./props FuzzTranslateRoundTrip
+./radav FuzzMultistatusXML
+./rasvn FuzzItemRoundTrip
+./rasvn FuzzReader
+./svn/hashfile FuzzRead
+./svn/path FuzzURICanonicalize
+./svn/skel FuzzParse
+./svn FuzzParseDate

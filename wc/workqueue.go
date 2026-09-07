@@ -158,7 +158,11 @@ func (database *Database) runWorkItem(ctx context.Context, item *skel.Node) erro
 		if err != nil {
 			return err
 		}
-		return removeDirectory(filepath.Join(database.wcRoot, filepath.FromSlash(string(arguments[0].Atom))), recursive)
+		name, err := database.resolveWorkPath(string(arguments[0].Atom))
+		if err != nil {
+			return err
+		}
+		return removeDirectory(name, recursive)
 	case workFileMove:
 		if len(arguments) != 2 {
 			return fmt.Errorf("invalid file-move")
@@ -217,7 +221,28 @@ func (database *Database) resolveWorkPath(relpath string) (string, error) {
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("work path %q escapes working copy", relpath)
 	}
-	return filepath.Join(database.wcRoot, clean), nil
+	resolved := filepath.Join(database.wcRoot, clean)
+	current := database.wcRoot
+	parent, err := filepath.Rel(database.wcRoot, filepath.Dir(resolved))
+	if err != nil {
+		return "", err
+	}
+	if parent != "." {
+		for _, component := range strings.Split(parent, string(filepath.Separator)) {
+			current = filepath.Join(current, component)
+			info, err := os.Lstat(current)
+			if os.IsNotExist(err) {
+				break
+			}
+			if err != nil {
+				return "", err
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return "", fmt.Errorf("work path %q traverses symlink %s", relpath, current)
+			}
+		}
+	}
+	return resolved, nil
 }
 
 func workBool(node *skel.Node) (bool, error) {

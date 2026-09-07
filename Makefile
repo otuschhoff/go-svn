@@ -1,7 +1,7 @@
 GO ?= go
 GOFMT ?= gofmt
 
-.PHONY: all build check test race lint vet format-check fuzz integration fixtures fixtures-check transcripts
+.PHONY: all build check test race lint vet format-check fuzz integration benchmark fixtures fixtures-check transcripts
 
 all: check
 
@@ -36,10 +36,14 @@ lint: vet
 	@command -v govulncheck >/dev/null 2>&1 || { echo 'govulncheck is required for make lint'; exit 1; }
 	CGO_ENABLED=0 govulncheck ./...
 
-# Phase 0 has no fuzz targets yet. Later phases extend this target package-by-package.
 fuzz:
-	@packages="$$(CGO_ENABLED=0 $(GO) list ./...)"; \
-	if [ -n "$$packages" ]; then CGO_ENABLED=0 $(GO) test $$packages -run '^$$'; else echo 'no Go packages to fuzz'; fi
+	@while read package target; do \
+		echo "fuzz $$package/$$target"; \
+		CGO_ENABLED=0 $(GO) test "$$package" -run '^$$' -fuzz="^$$target$$" -fuzztime="$${FUZZTIME:-10s}" || exit 1; \
+	done < scripts/fuzz-targets.txt
+
+benchmark:
+	CGO_ENABLED=0 $(GO) test -run '^$$' -bench . -benchmem ./delta ./fs/fsfs ./rasvn ./wc
 
 integration:
 	CGO_ENABLED=0 $(GO) test -tags integration ./...

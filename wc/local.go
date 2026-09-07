@@ -343,22 +343,27 @@ func (database *Database) checkDeleteSafe(ctx context.Context, targetPath string
 
 func (database *Database) insertDeleteLayer(ctx context.Context, relpath string) error {
 	opDepth := relpathDepth(relpath)
-	transaction, err := database.sql.BeginTx(ctx, nil)
-	if err != nil {
+	if _, err := database.sql.ExecContext(ctx, `SAVEPOINT insert_delete_layer`); err != nil {
 		return err
 	}
-	defer transaction.Rollback()
-	if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND
+	rollback := func() {
+		_, _ = database.sql.ExecContext(ctx, `ROLLBACK TO insert_delete_layer`)
+		_, _ = database.sql.ExecContext(ctx, `RELEASE insert_delete_layer`)
+	}
+	if _, err := database.sql.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id=? AND
 		(local_relpath=? OR local_relpath LIKE ? ESCAPE '#') AND op_depth>0`, database.wcID, relpath, descendantPattern(relpath)); err != nil {
+		rollback()
 		return err
 	}
-	if _, err := transaction.ExecContext(ctx, `INSERT OR REPLACE INTO NODES
+	if _, err := database.sql.ExecContext(ctx, `INSERT OR REPLACE INTO NODES
 		(wc_id, local_relpath, op_depth, parent_relpath, presence, kind)
 		SELECT wc_id, local_relpath, ?, parent_relpath, 'base-deleted', kind FROM NODES_BASE
 		WHERE wc_id=? AND (local_relpath=? OR local_relpath LIKE ? ESCAPE '#')`, opDepth, database.wcID, relpath, descendantPattern(relpath)); err != nil {
+		rollback()
 		return err
 	}
-	return transaction.Commit()
+	_, err := database.sql.ExecContext(ctx, `RELEASE insert_delete_layer`)
+	return err
 }
 
 func (database *Database) SetProperty(ctx context.Context, targetPath, name string, value []byte, force bool) error {

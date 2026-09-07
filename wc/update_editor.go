@@ -56,6 +56,7 @@ type updateEditor struct {
 	aborted          bool
 	deleted          map[string]bool
 	copySources      map[string]nodeRow
+	transactionOpen  bool
 }
 
 type updateDirectory struct {
@@ -112,7 +113,10 @@ func NewUpdateEditor(ctx context.Context, database *Database, anchorPath string,
 	if options.SwitchURL != "" {
 		repositoryBase = strings.TrimPrefix(sessionPath(database.repository.Root, options.SwitchURL), "/")
 	}
-	return &updateEditor{database: database, anchor: anchor, repositoryBase: repositoryBase, repositoryTarget: options.switchTarget, options: options, target: svn.InvalidRevnum, deleted: make(map[string]bool), copySources: make(map[string]nodeRow)}, nil
+	if _, err := database.sql.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	return &updateEditor{database: database, anchor: anchor, repositoryBase: repositoryBase, repositoryTarget: options.switchTarget, options: options, target: svn.InvalidRevnum, deleted: make(map[string]bool), copySources: make(map[string]nodeRow), transactionOpen: true}, nil
 }
 
 func (editor *updateEditor) SetTargetRevision(_ context.Context, revision svn.Revnum) error {
@@ -137,15 +141,32 @@ func (editor *updateEditor) CloseEdit(ctx context.Context) error {
 		return fmt.Errorf("%w: update was aborted", svn.ErrCancelled)
 	}
 	if err := editor.database.RunWorkQueue(ctx); err != nil {
+		editor.rollback()
 		return err
 	}
+	if _, err := editor.database.sql.ExecContext(ctx, "COMMIT"); err != nil {
+		editor.rollback()
+		return err
+	}
+	editor.transactionOpen = false
 	if editor.options.Notify != nil {
 		editor.options.Notify(notify.Notify{Action: notify.ActionUpdateCompleted, Path: editor.localPath(""), Revision: editor.target})
 	}
 	return nil
 }
 
-func (editor *updateEditor) AbortEdit(context.Context) error { editor.aborted = true; return nil }
+func (editor *updateEditor) AbortEdit(context.Context) error {
+	editor.aborted = true
+	editor.rollback()
+	return nil
+}
+
+func (editor *updateEditor) rollback() {
+	if editor.transactionOpen {
+		_, _ = editor.database.sql.Exec("ROLLBACK")
+		editor.transactionOpen = false
+	}
+}
 
 func (editor *updateEditor) relpath(editorPath string) string {
 	return path.Join(editor.anchor, editorPath)
@@ -329,6 +350,9 @@ func (database *Database) repositoryPathForAnchor(anchor string) string {
 }
 
 func (directory *updateDirectory) DeleteEntry(ctx context.Context, name string, _ svn.Revnum) error {
+	if err := validateEditorPath(name); err != nil {
+		return err
+	}
 	if directory.obstructed {
 		return nil
 	}
@@ -361,14 +385,9 @@ func (directory *updateDirectory) DeleteEntry(ctx context.Context, name string, 
 	if directory.editor.options.Accept == ConflictTheirs {
 		locallyModified = false
 	}
-	transaction, err := directory.editor.database.sql.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer transaction.Rollback()
 	if locallyModified {
 		opDepth := relpathDepth(relpath)
-		_, err = transaction.ExecContext(ctx, `INSERT OR IGNORE INTO NODES
+		_, err := directory.editor.database.sql.ExecContext(ctx, `INSERT OR IGNORE INTO NODES
 			(wc_id, local_relpath, op_depth, parent_relpath, repos_id, repos_path, revision, presence,
 			kind, properties, depth, checksum, symlink_target, changed_revision, changed_date, changed_author, file_external)
 			SELECT wc_id, local_relpath, ?, parent_relpath, repos_id, repos_path, revision, 'normal',
@@ -379,10 +398,7 @@ func (directory *updateDirectory) DeleteEntry(ctx context.Context, name string, 
 			return err
 		}
 	}
-	if _, err := transaction.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id = ? AND (local_relpath = ? OR local_relpath LIKE ? ESCAPE '#') AND op_depth = 0`, directory.editor.database.wcID, relpath, descendantPattern(relpath)); err != nil {
-		return err
-	}
-	if err := transaction.Commit(); err != nil {
+	if _, err := directory.editor.database.sql.ExecContext(ctx, `DELETE FROM NODES WHERE wc_id = ? AND (local_relpath = ? OR local_relpath LIKE ? ESCAPE '#') AND op_depth = 0`, directory.editor.database.wcID, relpath, descendantPattern(relpath)); err != nil {
 		return err
 	}
 	if locallyModified {
@@ -397,15 +413,20 @@ func (directory *updateDirectory) DeleteEntry(ctx context.Context, name string, 
 		if info.Kind == svn.NodeDir {
 			op, args = workDirRemove, []string{relpath, "1"}
 		}
-		_, err = directory.editor.database.Enqueue(ctx, WorkItem(op, args...))
+		if _, err := directory.editor.database.Enqueue(ctx, WorkItem(op, args...)); err != nil {
+			return err
+		}
 	}
 	if directory.editor.options.Notify != nil {
 		directory.editor.options.Notify(notify.Notify{Action: notify.ActionUpdateDelete, Path: directory.editor.localPath(name)})
 	}
-	return err
+	return nil
 }
 
 func (directory *updateDirectory) AddDirectory(ctx context.Context, name string, source *delta.CopySource) (delta.DirEditor, error) {
+	if err := validateEditorPath(name); err != nil {
+		return nil, err
+	}
 	depth := directory.editor.directoryDepth(name, svn.DepthInfinity)
 	if directory.obstructed {
 		child := &updateDirectory{editor: directory.editor, path: name, added: true, props: make(svn.Props), depth: depth, obstructed: true, shadowed: true}
@@ -457,6 +478,9 @@ func (directory *updateDirectory) AddDirectory(ctx context.Context, name string,
 }
 
 func (directory *updateDirectory) OpenDirectory(ctx context.Context, name string, _ svn.Revnum) (delta.DirEditor, error) {
+	if err := validateEditorPath(name); err != nil {
+		return nil, err
+	}
 	if directory.obstructed {
 		return noopUpdateDirectory(ctx)
 	}
@@ -484,6 +508,9 @@ func (directory *updateDirectory) ChangeProp(_ context.Context, name string, val
 }
 
 func (directory *updateDirectory) AbsentDirectory(ctx context.Context, name string) error {
+	if err := validateEditorPath(name); err != nil {
+		return err
+	}
 	if directory.obstructed {
 		return nil
 	}
@@ -492,6 +519,9 @@ func (directory *updateDirectory) AbsentDirectory(ctx context.Context, name stri
 }
 
 func (directory *updateDirectory) AddFile(ctx context.Context, name string, source *delta.CopySource) (delta.FileEditor, error) {
+	if err := validateEditorPath(name); err != nil {
+		return nil, err
+	}
 	if directory.obstructed {
 		return &updateFile{editor: directory.editor, path: name, added: true, props: make(svn.Props), localModified: true, obstructed: true, shadowed: true}, nil
 	}
@@ -527,6 +557,9 @@ func (directory *updateDirectory) AddFile(ctx context.Context, name string, sour
 }
 
 func (directory *updateDirectory) OpenFile(ctx context.Context, name string, _ svn.Revnum) (delta.FileEditor, error) {
+	if err := validateEditorPath(name); err != nil {
+		return nil, err
+	}
 	if directory.obstructed {
 		return noopUpdateFile(ctx)
 	}
@@ -558,6 +591,21 @@ func (directory *updateDirectory) OpenFile(ctx context.Context, name string, _ s
 		return &updateFile{editor: directory.editor, path: name, added: true, props: baseProps.Clone(), baseProps: baseProps, workingProps: info.WorkingProperties.Clone(), baseChecksum: checksum, baseRevision: base.revision, localAdded: true, conflicted: true}, nil
 	}
 	return &updateFile{editor: directory.editor, path: name, props: info.BaseProperties.Clone(), baseProps: info.BaseProperties.Clone(), workingProps: info.WorkingProperties.Clone(), baseChecksum: info.Checksum, baseRevision: info.Revision, localModified: status.TextStatus == StatusModified, localDeleted: info.Schedule == ScheduleDelete}, nil
+}
+
+func validateEditorPath(name string) error {
+	if name == "" {
+		return nil
+	}
+	if strings.ContainsAny(name, "\\\x00") || path.IsAbs(name) || path.Clean(name) != name {
+		return fmt.Errorf("%w: unsafe editor path %q", svn.ErrBadFilename, name)
+	}
+	for _, component := range strings.Split(name, "/") {
+		if component == ".." {
+			return fmt.Errorf("%w: unsafe editor path %q", svn.ErrBadFilename, name)
+		}
+	}
+	return nil
 }
 
 func (directory *updateDirectory) AbsentFile(ctx context.Context, name string) error {

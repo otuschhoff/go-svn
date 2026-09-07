@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/otuschhoff/go-svn/delta"
 	"github.com/otuschhoff/go-svn/ra"
@@ -53,6 +55,24 @@ func TestFileRevsStreamsLargeDelta(t *testing.T) {
 	}
 	if !bytes.Equal(output.Bytes(), content) {
 		t.Fatalf("content length=%d, want %d", output.Len(), len(content))
+	}
+}
+
+func TestReportRejectsExcessiveXMLNesting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method == "OPTIONS" {
+			response.Header().Set("SVN-Repository-Root", "/repo")
+			response.Header().Set("SVN-Repository-UUID", "uuid")
+			response.Header().Set("SVN-Youngest-Rev", "1")
+			response.Header().Set("SVN-Rev-Root-Stub", "/repo/!svn/rvr")
+			return
+		}
+		_, _ = io.WriteString(response, strings.Repeat("<a>", 10_001)+strings.Repeat("</a>", 10_001))
+	}))
+	defer server.Close()
+	session := openTestSession(t, server.URL+"/repo")
+	if _, err := session.DatedRevision(context.Background(), time.Now()); err == nil {
+		t.Fatal("deeply nested response was accepted")
 	}
 }
 

@@ -103,6 +103,12 @@ func TestSvndiffStreamAPI(t *testing.T) {
 }
 
 func TestSvndiffRejectsMalformedStreams(t *testing.T) {
+	oversizedWindow := []byte("SVN\x00")
+	oversizedWindow = appendVarint(oversizedWindow, 0)
+	oversizedWindow = appendVarint(oversizedWindow, MaxWindowSize+1)
+	oversizedWindow = appendVarint(oversizedWindow, 0)
+	oversizedWindow = appendVarint(oversizedWindow, 0)
+	oversizedWindow = appendVarint(oversizedWindow, 0)
 	tests := []struct {
 		name string
 		data []byte
@@ -113,6 +119,7 @@ func TestSvndiffRejectsMalformedStreams(t *testing.T) {
 		{"truncated header", []byte("SVN\x00\x00"), svn.ErrSvndiffUnexpectedEnd},
 		{"truncated section", []byte("SVN\x00\x00\x00\x01\x01\x00"), svn.ErrSvndiffUnexpectedEnd},
 		{"invalid selector", []byte("SVN\x00\x00\x00\x01\x01\x00\xff"), svn.ErrSvndiffInvalidOps},
+		{"oversized window", oversizedWindow, svn.ErrSvndiffCorruptWindow},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

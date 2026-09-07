@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/otuschhoff/go-svn/config"
 	"github.com/otuschhoff/go-svn/delta"
@@ -57,6 +58,7 @@ type Status struct {
 	PropertyStatus   StatusKind
 	Revision         svn.Revnum
 	ChangedRevision  svn.Revnum
+	ChangedDate      time.Time
 	ChangedAuthor    string
 	RepositoryPath   string
 	Copied           bool
@@ -267,7 +269,7 @@ func (database *Database) statusForInfo(ctx context.Context, info *Info) (*Statu
 	status := &Status{
 		Path: info.Path, RelativePath: info.RelativePath, Kind: info.Kind,
 		NodeStatus: StatusNormal, TextStatus: StatusNormal, PropertyStatus: StatusNormal,
-		Revision: info.Revision, ChangedRevision: info.ChangedRevision, ChangedAuthor: info.ChangedAuthor,
+		Revision: info.Revision, ChangedRevision: info.ChangedRevision, ChangedDate: info.ChangedDate, ChangedAuthor: info.ChangedAuthor,
 		RepositoryPath: info.RepositoryPath, RepositoryStatus: StatusNone,
 		Copied: info.Copied, FileExternal: info.FileExternal, MovedFrom: info.MovedFrom, MovedTo: info.MovedTo,
 		Changelist: info.Changelist, Lock: info.Lock,

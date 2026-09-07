@@ -43,6 +43,7 @@ type DiffSummary struct {
 	Path              string
 	Kind              svn.NodeKind
 	NodeStatus        byte
+	TextModified      bool
 	PropertiesChanged bool
 }
 
@@ -340,7 +341,7 @@ func emitDiff(output io.Writer, left, right map[string]diffNode, leftRevision, r
 			kind = oldNode.kind
 		}
 		if summary != nil {
-			if err := summary(DiffSummary{Path: displayName, Kind: kind, NodeStatus: status, PropertiesChanged: propertiesChanged}); err != nil {
+			if err := summary(DiffSummary{Path: displayName, Kind: kind, NodeStatus: status, TextModified: textChanged, PropertiesChanged: propertiesChanged}); err != nil {
 				return err
 			}
 			continue

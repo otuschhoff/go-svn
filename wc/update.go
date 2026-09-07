@@ -104,10 +104,12 @@ func (database *Database) Update(ctx context.Context, session ra.Session, target
 	}
 	reporter, err := session.DoUpdate(ctx, revision, reportTarget, options.Depth, !isNetworkSession(session), false, editor)
 	if err != nil {
+		_ = editor.AbortEdit(ctx)
 		return svn.InvalidRevnum, err
 	}
 	if err := database.crawl(ctx, targetPath, options.Depth, reporter, isNetworkSession(session), suppressRootLink); err != nil {
 		_ = reporter.AbortReport(ctx)
+		_ = editor.AbortEdit(ctx)
 		return svn.InvalidRevnum, err
 	}
 	if options.SetDepth != nil {
@@ -153,10 +155,12 @@ func (database *Database) Switch(ctx context.Context, session ra.Session, target
 	}
 	reporter, err := session.DoSwitch(ctx, revision, target, options.Depth, switchURL, !isNetworkSession(session), false, editor)
 	if err != nil {
+		_ = editor.AbortEdit(ctx)
 		return svn.InvalidRevnum, err
 	}
 	if err := database.crawl(ctx, targetPath, options.Depth, reporter, isNetworkSession(session), false); err != nil {
 		_ = reporter.AbortReport(ctx)
+		_ = editor.AbortEdit(ctx)
 		return svn.InvalidRevnum, err
 	}
 	if options.SetDepth != nil {

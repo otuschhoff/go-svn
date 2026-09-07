@@ -2,7 +2,11 @@ package delta
 
 import "bytes"
 
-const xdeltaBlockSize = 64
+const (
+	xdeltaBlockSize     = 64
+	xdeltaMaxCandidates = 64
+	xdeltaGoodMatch     = 1024
+)
 
 func buildSourceIndex(source []byte) map[uint32][]int {
 	index := make(map[uint32][]int)
@@ -27,7 +31,11 @@ func buildWindow(source, target []byte, sourceOffset int64) Window {
 		matchOffset, matchLength := -1, 0
 		if position+xdeltaBlockSize <= len(target) {
 			hash := rollingHash(target[position : position+xdeltaBlockSize])
-			for _, candidate := range index[hash] {
+			candidates := index[hash]
+			if len(candidates) > xdeltaMaxCandidates {
+				candidates = candidates[:xdeltaMaxCandidates]
+			}
+			for _, candidate := range candidates {
 				if !bytes.Equal(source[candidate:candidate+xdeltaBlockSize], target[position:position+xdeltaBlockSize]) {
 					continue
 				}
@@ -37,6 +45,9 @@ func buildWindow(source, target []byte, sourceOffset int64) Window {
 				}
 				if length > matchLength {
 					matchOffset, matchLength = candidate, length
+					if matchLength >= xdeltaGoodMatch {
+						break
+					}
 				}
 			}
 		}
