@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/otuschhoff/go-svn/mergeinfo"
@@ -374,8 +373,4 @@ func (client *Client) MergeinfoLog(ctx context.Context, sourceValue, targetValue
 		}
 	}
 	return nil
-}
-
-func localListPath(root, name string) string {
-	return filepath.Join(root, filepath.FromSlash(name))
 }

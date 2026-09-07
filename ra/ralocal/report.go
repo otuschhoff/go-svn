@@ -340,7 +340,7 @@ func diffDirectory(ctx context.Context, output delta.DirEditor, repository *repo
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		before, hadBefore := oldEntries[name]
+		before := oldEntries[name]
 		after, hasAfter := currentEntries[name]
 		childRepositoryPath := path.Join(repositoryPath, name)
 		childEditorPath := path.Join(editorPath, name)
@@ -351,9 +351,8 @@ func diffDirectory(ctx context.Context, output delta.DirEditor, repository *repo
 		if lookupErr != nil {
 			return lookupErr
 		}
-		if childOldRoot == nil {
-			hadBefore = false
-		} else {
+		hadBefore := false
+		if childOldRoot != nil {
 			kind, checkErr := childOldRoot.CheckPath(ctx, childOldPath)
 			if checkErr != nil {
 				return checkErr

@@ -520,25 +520,6 @@ func propertyDiff(previous, current svn.Props) svn.Props {
 	return result
 }
 
-func propertiesEqual(left, right svn.Props) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for name, value := range left {
-		if !bytes.Equal(value, right[name]) {
-			return false
-		}
-	}
-	return true
-}
-
-func absRevision(value svn.Revnum) int {
-	if value < 0 {
-		return int(-value)
-	}
-	return int(value)
-}
-
 func (session *Session) GetMergeinfo(ctx context.Context, paths []string, revision svn.Revnum, inheritance mergeinfo.Inheritance, descendants bool) (map[string]mergeinfo.Mergeinfo, error) {
 	return session.repository.GetMergeinfo(ctx, session.paths(paths), revision, inheritance, descendants)
 }
@@ -685,17 +666,6 @@ func matches(patterns []string, name string) bool {
 		}
 	}
 	return false
-}
-
-func fullDelta(content []byte) delta.WindowReader {
-	if len(content) == 0 {
-		return delta.Windows()
-	}
-	return delta.Windows(delta.Window{TargetLength: len(content), Ops: []delta.Op{{Kind: delta.OpNew, Length: len(content)}}, NewData: append([]byte(nil), content...)})
-}
-
-func notImplemented(operation string) error {
-	return fmt.Errorf("%w: read-only file session does not support %s", svn.ErrRANotImplemented, operation)
 }
 
 var _ ra.Session = (*Session)(nil)

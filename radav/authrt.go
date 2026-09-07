@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -443,9 +442,4 @@ func digestAuthorization(challenge authChallenge, credentials *auth.Credentials,
 
 func quoteAuth(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
-}
-
-func parseNonceCount(value string) (uint32, error) {
-	parsed, err := strconv.ParseUint(value, 16, 32)
-	return uint32(parsed), err
 }

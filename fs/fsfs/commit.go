@@ -99,12 +99,17 @@ func (transaction *Transaction) Commit(ctx context.Context, lockTokens map[strin
 				return err
 			}
 			builder.items = append(builder.items, &revisionItem{number: 1, kind: p2lChanges, data: changes})
-			revisionData, err = builder.logicalRevision()
+			data, revisionErr := builder.logicalRevision()
+			if revisionErr != nil {
+				return revisionErr
+			}
+			revisionData = data
 		} else {
-			revisionData, err = builder.physicalRevision(ctx)
-		}
-		if err != nil {
-			return err
+			data, revisionErr := builder.physicalRevision(ctx)
+			if revisionErr != nil {
+				return revisionErr
+			}
+			revisionData = data
 		}
 		revisionPath := transaction.filesystem.unpackedRevisionPath(committed)
 		if err := os.MkdirAll(filepath.Dir(revisionPath), 0o755); err != nil {

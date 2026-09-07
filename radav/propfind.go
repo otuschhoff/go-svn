@@ -410,7 +410,3 @@ func matches(patterns []string, name string) bool {
 	}
 	return false
 }
-
-func unexpectedKind(name string, want svn.NodeKind) error {
-	return fmt.Errorf("%w: %s is not %s", svn.ErrFSNotFound, name, want)
-}

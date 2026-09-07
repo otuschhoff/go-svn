@@ -1064,6 +1064,3 @@ func cloneLock(lock *svn.Lock) *svn.Lock {
 	copy := *lock
 	return &copy
 }
-func notImplemented(operation string) error {
-	return fmt.Errorf("%w: in-memory %s", svn.ErrRANotImplemented, operation)
-}

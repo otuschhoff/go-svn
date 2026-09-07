@@ -127,7 +127,7 @@ func (client *Client) resolveTarget(ctx context.Context, value string, options I
 			result.close()
 			return nil, err
 		}
-		pegRevision := result.revision
+		var pegRevision svn.Revnum
 		if peg.Kind == svn.RevisionUnspecified {
 			pegRevision, err = session.LatestRevision(ctx)
 		} else {

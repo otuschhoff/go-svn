@@ -15,8 +15,7 @@ import (
 )
 
 func TestOpenDiscoversRedirectedRepository(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/repo" {
 			http.Redirect(writer, request, "/repo/", http.StatusMovedPermanently)
 			return

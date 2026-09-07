@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/otuschhoff/go-svn/fs"
@@ -66,8 +65,4 @@ func parseChanges(data []byte) (map[string]fs.PathChange, error) {
 		return nil, err
 	}
 	return result, nil
-}
-
-func parseBool(value string) (bool, error) {
-	return strconv.ParseBool(value)
 }

@@ -444,11 +444,3 @@ func sortedPropertyNames(properties svn.Props) []string {
 	sort.Strings(names)
 	return names
 }
-
-func parsePositiveInt(value string) (int, error) {
-	number, err := strconv.Atoi(value)
-	if err != nil || number < 0 {
-		return 0, fmt.Errorf("invalid non-negative integer %q", value)
-	}
-	return number, nil
-}

@@ -929,10 +929,6 @@ func parseLock(items []Item) (*svn.Lock, error) {
 	return lock, nil
 }
 
-func notImplemented(operation string) error {
-	return fmt.Errorf("%w: ra_svn %s", svn.ErrRANotImplemented, operation)
-}
-
 func (session *Session) ChangeRevProp(ctx context.Context, revision svn.Revnum, name string, value, oldValue []byte, dontCare bool) error {
 	if !revision.IsValid() || name == "" {
 		return fmt.Errorf("%w: invalid revision property change", svn.ErrIncorrectParams)

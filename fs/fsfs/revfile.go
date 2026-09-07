@@ -419,15 +419,6 @@ func parseLogicalFooterAt(data []byte, base int64) (logicalFooter, error) {
 	return logicalFooter{l2pOffset: l2pOffset, p2lOffset: p2lOffset, endOffset: base, l2pDigest: fields[1], p2lDigest: fields[3]}, nil
 }
 
-func parseL2PIndex(data []byte) (map[svn.Revnum]map[int64]int64, int64, error) {
-	footer, err := parseLogicalFooter(data)
-	if err != nil {
-		return nil, 0, err
-	}
-	locations, err := parseL2P(data[footer.l2pOffset:footer.p2lOffset])
-	return locations, footer.l2pOffset, err
-}
-
 func parseLogicalIndexes(data []byte) (map[svn.Revnum]map[int64]int64, int64, error) {
 	footer, err := parseLogicalFooter(data)
 	if err != nil {
