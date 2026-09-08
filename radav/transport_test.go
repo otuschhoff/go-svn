@@ -3,13 +3,14 @@ package radav
 import (
 	"bytes"
 	"context"
-	"github.com/otuschhoff/go-svn/auth"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/otuschhoff/go-svn/auth"
 
 	"github.com/otuschhoff/go-svn/config"
 	"github.com/otuschhoff/go-svn/ra"

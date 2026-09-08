@@ -4,7 +4,6 @@ package wc
 
 import (
 	"context"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
