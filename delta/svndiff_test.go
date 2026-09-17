@@ -168,17 +168,19 @@ func TestSvndiffRejectsMalformedCompressedSections(t *testing.T) {
 func FuzzDecoder(f *testing.F) {
 	f.Add([]byte("SVN\x00"))
 	f.Add([]byte("SVN\x01\x00\x00\x00\x01\x00\x81"))
+	f.Add(append([]byte("SVN\x00"), make([]byte, 5*1001)...))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		decoder, err := NewDecoder(bytes.NewReader(data))
 		if err != nil {
 			return
 		}
-		for count := 0; count < 1000; count++ {
+		maxWindows := (len(data) - 4) / 5
+		for count := 0; count <= maxWindows; count++ {
 			_, err := decoder.NextWindow()
 			if err != nil {
 				return
 			}
 		}
-		t.Fatal("decoder accepted more than 1000 windows from bounded input")
+		t.Fatal("decoder accepted more windows than fit in bounded input")
 	})
 }
