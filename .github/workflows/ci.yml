@@ -135,4 +135,4 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
-      - run: go test '${{ matrix.package }}' -run '^$' -fuzz='^${{ matrix.target }}$' -fuzztime=10m
+      - run: go test '${{ matrix.package }}' -run '^$' -fuzz='^${{ matrix.target }}$' -fuzztime=10m -timeout=15m
